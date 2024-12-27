@@ -366,6 +366,7 @@
     <ClInclude Include="main.h" />
     <CLInclude Include="resource.h" />
     <ClInclude Include="structures.h" />
+    <ClInclude Include="TerrainGenDS.h" />
     <ResourceCompile Include="Tutorial01.rc" />
   </ItemGroup>
   <ItemGroup>
@@ -380,6 +381,7 @@
     <ClCompile Include="imgui\imgui_tables.cpp" />
     <ClCompile Include="imgui\imgui_widgets.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="TerrainGenDS.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="Resources\stone.dds" />

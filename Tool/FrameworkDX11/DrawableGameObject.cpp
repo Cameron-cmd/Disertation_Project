@@ -1,5 +1,6 @@
 #include "DrawableGameObject.h"
 
+
 using namespace std;
 using namespace DirectX;
 
@@ -51,57 +52,100 @@ HRESULT DrawableGameObject::initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceConte
 	int indexCount = 0;
 	SimpleVertex* vertices{};
 	WORD* indices{};
-	ifstream myfile;
-	myfile.open("Resources//Teddy.obj", ios::in);
-	if (!myfile.fail())
+
+	TerrainGenDS newTerrain = TerrainGenDS(8);
+	newTerrain.Generate(0.5);
+
+	float* array = newTerrain._map;
+	vertexCount = newTerrain._size * newTerrain._size;
+	indexCount = ((newTerrain._size - 1) * (newTerrain._size - 1))*2;
+	vertices = new SimpleVertex[vertexCount];
+	indices = new WORD[indexCount];
+	m_IndexCount = indexCount;
+	int count = 0;
+	for (int x = 0; x < newTerrain._size; x++)
 	{
-		string line;
-		while (getline(myfile, line)) {
-			if (line[0] == 'v') { vertexCount++; }
-			if (line[0] == 'f') { indexCount++; indexCount++; indexCount++; }
+		for (int y = 0; y < newTerrain._size; y++)
+		{
+			SimpleVertex SV;
+			SV.Pos = XMFLOAT3(x,y,newTerrain.GetMap(x,y));
+			SV.Normal = XMFLOAT3(0, 0, 0);
+			SV.TexCoord = XMFLOAT2(0, 0);
+			vertices[count] = SV;
+			count++;
 		}
-		line.clear();
-		m_IndexCount = indexCount;
-		vertices = new SimpleVertex[vertexCount];
-		indices = new WORD[indexCount];
-		int vertIndex = 0;
-		int indIndex = 0;	
-		float indcount = 0;
-		myfile.clear();                 // clear fail and eof bits
-		myfile.seekg(0, std::ios::beg); // back to the start!
-		while (getline(myfile, line)) {
-			if (!line.empty() && line[0] == 'v') {
-				XMFLOAT3 vertex;
-				sscanf(line.c_str(), "v %f %f %f", &vertex.x, &vertex.y, &vertex.z);
-				SimpleVertex SV;
-				SV.Pos = vertex;
-				SV.Normal = XMFLOAT3(0, 0, 0);
-				SV.TexCoord = XMFLOAT2(0, 0);
-				vertices[vertIndex] = SimpleVertex(SV);
-				//OutputDebugStringA((to_string(vertices[vertIndex].Pos.x) + " ").c_str());
-				//OutputDebugStringA((to_string(vertices[vertIndex].Pos.y) + " ").c_str());
-				//OutputDebugStringA((to_string(vertices[vertIndex].Pos.z)+"\n").c_str());
-				vertIndex++;
-				continue;
-			}
-			if (!line.empty() && line[0] == 'f') {
-				XMINT3 face;
-				sscanf(line.c_str(), "f %i %i %i", &face.x, &face.y, &face.z);
-				indices[indIndex] = face.x;
-				//OutputDebugStringA((to_string(indices[indIndex])+" ").c_str());
-				indIndex++;
-				indices[indIndex] = face.y;
-				//OutputDebugStringA((to_string(indices[indIndex]) + " ").c_str());
-				indIndex++;
-				indices[indIndex] = face.z;
-				//OutputDebugStringA((to_string(indices[indIndex]) + "\n").c_str());
-				indIndex++;
-
-			}
-		}
-
-
 	}
+	int ind1 = 0;
+	int ind2 = 1;
+	count = 0;
+	while (count < indexCount)
+	{
+		indices[count] = (WORD)ind1;
+		count++;
+		indices[count] = (WORD)ind2;
+		count++;
+		indices[count] = (WORD)(ind2 + newTerrain._max);
+		count++;
+		indices[count] = (WORD)(ind2);
+		count++;
+		indices[count] = (WORD)(ind2 + newTerrain._max);
+		count++;
+		indices[count] = (WORD)(ind1 + newTerrain._max);
+		count++;
+		ind1 += 2;
+		ind2 += 2;
+	}
+	//ifstream myfile;
+	//myfile.open("Resources//MeshFile1.obj", ios::in);
+	//if (!myfile.fail())
+	//{
+	//	string line;
+	//	while (getline(myfile, line)) {
+	//		if (line[0] == 'v') { vertexCount++; }
+	//		if (line[0] == 'f') { indexCount++; indexCount++; indexCount++; }
+	//	}
+	//	line.clear();
+	//	m_IndexCount = indexCount;
+	//	vertices = new SimpleVertex[vertexCount];
+	//	indices = new WORD[indexCount];
+	//	int vertIndex = 0;
+	//	int indIndex = 0;	
+	//	float indcount = 0;
+	//	myfile.clear();                 // clear fail and eof bits
+	//	myfile.seekg(0, std::ios::beg); // back to the start!
+	//	while (getline(myfile, line)) {
+	//		if (!line.empty() && line[0] == 'v') {
+	//			XMFLOAT3 vertex;
+	//			sscanf(line.c_str(), "v %f %f %f", &vertex.x, &vertex.y, &vertex.z);
+	//			SimpleVertex SV;
+	//			SV.Pos = vertex;
+	//			SV.Normal = XMFLOAT3(0, 0, 0);
+	//			SV.TexCoord = XMFLOAT2(0, 0);
+	//			vertices[vertIndex] = SimpleVertex(SV);
+	//			//OutputDebugStringA((to_string(vertices[vertIndex].Pos.x) + " ").c_str());
+	//			//OutputDebugStringA((to_string(vertices[vertIndex].Pos.y) + " ").c_str());
+	//			//OutputDebugStringA((to_string(vertices[vertIndex].Pos.z)+"\n").c_str());
+	//			vertIndex++;
+	//			continue;
+	//		}
+	//		if (!line.empty() && line[0] == 'f') {
+	//			XMINT3 face;
+	//			sscanf(line.c_str(), "f %i %i %i", &face.x, &face.y, &face.z);
+	//			indices[indIndex] = face.x-1;
+	//			//OutputDebugStringA((to_string(indices[indIndex])+" ").c_str());
+	//			indIndex++;
+	//			indices[indIndex] = face.y-1;
+	//			//OutputDebugStringA((to_string(indices[indIndex]) + " ").c_str());
+	//			indIndex++;
+	//			indices[indIndex] = face.z-1;
+	//			//OutputDebugStringA((to_string(indices[indIndex]) + "\n").c_str());
+	//			indIndex++;
+
+	//		}
+	//	}
+
+
+	//}
 		//if (vertices.size() > 0) {
 		//	WORD indices[faces.size()]
 		//}

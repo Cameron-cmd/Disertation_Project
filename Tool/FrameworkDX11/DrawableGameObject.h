@@ -11,6 +11,7 @@
 #include "structures.h"
 #include <fstream>
 #include <vector>
+#include "TerrainGenDS.h";
 
 using namespace DirectX;
 

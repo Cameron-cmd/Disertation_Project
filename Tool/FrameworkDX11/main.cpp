@@ -526,7 +526,7 @@ HRESULT		InitRunTimeParameters()
 // ***************************************************************************************
 HRESULT		InitWorld(int width, int height)
 {
-    g_pCamera = new Camera(XMFLOAT3(0.0f, 0, -3), XMFLOAT3(0, 0, 1), XMFLOAT3(0.0f, 1.0f, 0.0f));
+    g_pCamera = new Camera(XMFLOAT3(0.0f, 750.0f, -3), XMFLOAT3(0, 0, 1), XMFLOAT3(0.0f, 1.0f, 0.0f));
 
 	// Initialize the projection matrix
     constexpr float fovAngleY = XMConvertToRadians(60.0f);
