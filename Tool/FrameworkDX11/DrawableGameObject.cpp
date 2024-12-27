@@ -50,7 +50,7 @@ HRESULT DrawableGameObject::initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceConte
 	int vertexCount = 0;
 	int indexCount = 0;
 	SimpleVertex* vertices{};
-	WORD* indices;
+	WORD* indices{};
 	ifstream myfile;
 	myfile.open("Resources//Teddy.obj", ios::in);
 	if (!myfile.fail())
@@ -78,19 +78,20 @@ HRESULT DrawableGameObject::initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceConte
 				SV.Normal = XMFLOAT3(0, 0, 0);
 				SV.TexCoord = XMFLOAT2(0, 0);
 				vertices[vertIndex] = SimpleVertex(SV);
-		/*		OutputDebugStringA(to_string(vertices[vertIndex].Pos.x).c_str());
-				OutputDebugStringA(to_string(vertices[vertIndex].Pos.y).c_str());
-				OutputDebugStringA(to_string(vertices[vertIndex].Pos.z).c_str());*/
+				//OutputDebugStringA((to_string(vertices[vertIndex].Pos.x) + " ").c_str());
+				//OutputDebugStringA((to_string(vertices[vertIndex].Pos.y) + " ").c_str());
+				//OutputDebugStringA((to_string(vertices[vertIndex].Pos.z)+"\n").c_str());
 				vertIndex++;
+				continue;
 			}
 			if (!line.empty() && line[0] == 'f') {
 				XMINT3 face;
 				sscanf(line.c_str(), "f %i %i %i", &face.x, &face.y, &face.z);
 				indices[indIndex] = face.x;
-				//OutputDebugStringA((to_string(indices[indIndex])+"\n").c_str());
+				//OutputDebugStringA((to_string(indices[indIndex])+" ").c_str());
 				indIndex++;
 				indices[indIndex] = face.y;
-				//OutputDebugStringA((to_string(indices[indIndex]) + "\n").c_str());
+				//OutputDebugStringA((to_string(indices[indIndex]) + " ").c_str());
 				indIndex++;
 				indices[indIndex] = face.z;
 				//OutputDebugStringA((to_string(indices[indIndex]) + "\n").c_str());
