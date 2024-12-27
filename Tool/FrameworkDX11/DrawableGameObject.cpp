@@ -47,34 +47,60 @@ void DrawableGameObject::cleanup()
 
 HRESULT DrawableGameObject::initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceContext* pContext)
 {
-	
+	int vertexCount = 0;
+	int indexCount = 0;
+	SimpleVertex* vertices{};
+	WORD* indices;
 	ifstream myfile;
-	myfile.open(L"Resouces\\MeshFile1.obj", ios::in);
-	//if (myfile.is_open())
-	//{
-		vector<SimpleVertex*> vertices;
-		//vector<XMINT3*> faces;
-		vector<float> indices;
+	myfile.open("Resources//Teddy.obj", ios::in);
+	if (!myfile.fail())
+	{
 		string line;
 		while (getline(myfile, line)) {
+			if (line[0] == 'v') { vertexCount++; }
+			if (line[0] == 'f') { indexCount++; indexCount++; indexCount++; }
+		}
+		line.clear();
+		m_IndexCount = indexCount;
+		vertices = new SimpleVertex[vertexCount];
+		indices = new WORD[indexCount];
+		int vertIndex = 0;
+		int indIndex = 0;	
+		float indcount = 0;
+		myfile.clear();                 // clear fail and eof bits
+		myfile.seekg(0, std::ios::beg); // back to the start!
+		while (getline(myfile, line)) {
 			if (!line.empty() && line[0] == 'v') {
-				static XMFLOAT3 vertex;
+				XMFLOAT3 vertex;
 				sscanf(line.c_str(), "v %f %f %f", &vertex.x, &vertex.y, &vertex.z);
 				SimpleVertex SV;
 				SV.Pos = vertex;
 				SV.Normal = XMFLOAT3(0, 0, 0);
 				SV.TexCoord = XMFLOAT2(0, 0);
-				vertices.push_back(new SimpleVertex(SV));
+				vertices[vertIndex] = SimpleVertex(SV);
+		/*		OutputDebugStringA(to_string(vertices[vertIndex].Pos.x).c_str());
+				OutputDebugStringA(to_string(vertices[vertIndex].Pos.y).c_str());
+				OutputDebugStringA(to_string(vertices[vertIndex].Pos.z).c_str());*/
+				vertIndex++;
 			}
 			if (!line.empty() && line[0] == 'f') {
-				static XMINT3 face;
-				sscanf(line.c_str(), "f %f %f %f", &face.x, &face.y, &face.z);
-				indices.push_back(face.x);
-				indices.push_back(face.y);
-				indices.push_back(face.z);
+				XMINT3 face;
+				sscanf(line.c_str(), "f %i %i %i", &face.x, &face.y, &face.z);
+				indices[indIndex] = face.x;
+				//OutputDebugStringA((to_string(indices[indIndex])+"\n").c_str());
+				indIndex++;
+				indices[indIndex] = face.y;
+				//OutputDebugStringA((to_string(indices[indIndex]) + "\n").c_str());
+				indIndex++;
+				indices[indIndex] = face.z;
+				//OutputDebugStringA((to_string(indices[indIndex]) + "\n").c_str());
+				indIndex++;
+
 			}
 		}
 
+
+	}
 		//if (vertices.size() > 0) {
 		//	WORD indices[faces.size()]
 		//}
@@ -163,12 +189,12 @@ HRESULT DrawableGameObject::initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceConte
 
 	D3D11_BUFFER_DESC bd = {};
 	bd.Usage = D3D11_USAGE_DEFAULT;
-	bd.ByteWidth = sizeof(SimpleVertex) * NUM_VERTICES;
+	bd.ByteWidth = sizeof(SimpleVertex) * vertexCount;
 	bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
 	bd.CPUAccessFlags = 0;
 
 	D3D11_SUBRESOURCE_DATA InitData = {};
-	InitData.pSysMem = &vertices;
+	InitData.pSysMem = vertices;
 	HRESULT hr = pd3dDevice->CreateBuffer(&bd, &InitData, &m_pVertexBuffer);
 	if (FAILED(hr))
 		return hr;
@@ -180,10 +206,10 @@ HRESULT DrawableGameObject::initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceConte
 
 
 	bd.Usage = D3D11_USAGE_DEFAULT;
-	bd.ByteWidth = sizeof(WORD) * NUM_VERTICES;        // 36 vertices needed for 12 triangles in a triangle list
+	bd.ByteWidth = sizeof(WORD) * indexCount;        // 36 vertices needed for 12 triangles in a triangle list
 	bd.BindFlags = D3D11_BIND_INDEX_BUFFER;
 	bd.CPUAccessFlags = 0;
-	InitData.pSysMem = &indices;
+	InitData.pSysMem = indices;
 	hr = pd3dDevice->CreateBuffer(&bd, &InitData, &m_pIndexBuffer);
 	if (FAILED(hr))
 		return hr;
@@ -253,5 +279,5 @@ void DrawableGameObject::draw(ID3D11DeviceContext* pContext)
 	pContext->PSSetShaderResources(0, 1, &m_pTextureResourceView);
 	pContext->PSSetSamplers(0, 1, &m_pSamplerLinear);
 
-	pContext->DrawIndexed(NUM_VERTICES, 0, 0);
+	pContext->DrawIndexed(m_IndexCount, 0, 0);
 }

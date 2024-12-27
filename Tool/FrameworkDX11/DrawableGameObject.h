@@ -19,6 +19,8 @@ struct SimpleVertex
 	XMFLOAT3 Pos;
 	XMFLOAT3 Normal;
 	XMFLOAT2 TexCoord;
+
+	SimpleVertex() : Pos(XMFLOAT3(0, 0, 0)), Normal(XMFLOAT3(0, 0, 0)), TexCoord(XMFLOAT2(0, 0)) {}
 };
 
 class DrawableGameObject
@@ -51,5 +53,6 @@ private:
 	MaterialPropertiesConstantBuffer	m_material;
 	ID3D11Buffer*						m_pMaterialConstantBuffer = nullptr;
 	XMFLOAT3							m_position;
+	INT									m_IndexCount;
 };
 
