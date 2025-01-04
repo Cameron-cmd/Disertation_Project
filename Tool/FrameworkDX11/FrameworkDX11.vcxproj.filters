@@ -30,6 +30,7 @@
       <Filter>imgui</Filter>
     </ClCompile>
     <ClCompile Include="TerrainGenDS.cpp" />
+    <ClCompile Include="HydraulicErosion.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Camera.h" />
@@ -64,6 +65,8 @@
       <Filter>imgui</Filter>
     </ClInclude>
     <ClInclude Include="TerrainGenDS.h" />
+    <ClInclude Include="HydraulicErosion.h" />
+    <ClInclude Include="FastNoiseLite.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="Tutorial01.rc" />

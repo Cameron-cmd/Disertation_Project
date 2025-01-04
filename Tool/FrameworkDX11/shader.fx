@@ -80,7 +80,7 @@ struct VS_INPUT
 {
     float4 Pos : POSITION;
 	float3 Norm : NORMAL;
-	float2 Tex : TEXCOORD0;
+	float3 Colour : COLOUR0;
 };
 
 struct PS_INPUT
@@ -88,7 +88,8 @@ struct PS_INPUT
     float4 Pos : SV_POSITION;
 	float4 worldPos : POSITION;
 	float3 Norm : NORMAL;
-	float2 Tex : TEXCOORD0;
+	float3 Colour : COLOUR0;
+	
 };
 
 
@@ -185,9 +186,9 @@ PS_INPUT VS( VS_INPUT input )
     output.Pos = mul( output.Pos, Projection );
 
 	// multiply the normal by the world transform (to go from model space to world space)
-	output.Norm = mul(float4(input.Norm, 0), World).xyz;
+    output.Norm = normalize(mul(float4(input.Norm, 0), World).xyz);
 
-	output.Tex = input.Tex;
+	output.Colour = input.Colour;
     
     return output;
 }
@@ -201,17 +202,17 @@ float4 PS(PS_INPUT IN) : SV_TARGET
 {
 	LightingResult lit = ComputeLighting(IN.worldPos, normalize(IN.Norm));
 
-	float4 texColor = { 1, 1, 1, 1 };
+    float4 texColor = { IN.Colour.r, IN.Colour.g, IN.Colour.b, 1 };
 
 	float4 emissive = Material.Emissive;
 	float4 ambient = Material.Ambient * GlobalAmbient;
 	float4 diffuse = Material.Diffuse * lit.Diffuse;
 	float4 specular = Material.Specular * lit.Specular;
 
-	if (Material.UseTexture)
-	{
-		texColor = txDiffuse.Sample(samLinear, IN.Tex);
-	}
+	//if (Material.UseTexture)
+	//{
+	//	texColor = txDiffuse.Sample(samLinear, IN.Tex);
+	//}
 
 	float4 finalColor = (emissive + ambient + diffuse + specular) * texColor;
 

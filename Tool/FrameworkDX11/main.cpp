@@ -22,6 +22,9 @@
 #include "imgui/imgui_impl_win32.h"
 #include "imgui/imgui_impl_dx11.h"
 
+#include "FastNoiseLite.h"
+#include <random>
+
 Camera* g_pCamera;
 
 
@@ -74,6 +77,31 @@ DrawableGameObject		g_GameObject;
 
 ImVec4                  light_colour = ImVec4(0.9f, 0.7f, 0.03f, 0.2f);
 XMMATRIX                obj_rotation = XMMatrixRotationX(0);
+
+// Terrain Values
+// DiamondSquare
+int                     t_detail = 9;
+float                   t_roughness = 0.5;
+int                     h_cycles = 100;
+
+bool                    n_PerlinOn = true;
+float                   n_PerlinFrequency = 0.1f;
+bool                    n_SimplexOn = false;
+float                   n_SimplexFrequency = 0.1f;
+bool                    n_CellularOn = false;
+float                   n_CellularFrequency = 0.1f;
+int                     n_resolution_x = 1024;
+int                     n_resolution_y = 1024;
+
+uint32_t*               n_pixels;
+
+FastNoiseLite           n_Perlin = FastNoiseLite();
+FastNoiseLite           n_Simplex = FastNoiseLite();
+FastNoiseLite           n_Cellular = FastNoiseLite();
+
+ID3D11ShaderResourceView* n_texture = nullptr;
+
+
 //--------------------------------------------------------------------------------------
 // Entry point to the program. Initializes everything and goes into a message processing 
 // loop. Idle time is used to render the scene.
@@ -424,7 +452,8 @@ HRESULT InitDevice()
 			L"Failed to initialise world.", L"Error", MB_OK);
 		return hr;
 	}
-
+    g_GameObject.setDetailRoughness(t_detail, t_roughness);
+    g_GameObject.generateTerrain();
 	hr = g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
 	if (FAILED(hr))
     {
@@ -442,6 +471,15 @@ HRESULT InitDevice()
 
 HRESULT		InitRunTimeParameters()
 {
+    n_Perlin.SetNoiseType(n_Perlin.NoiseType_Perlin);
+    n_Perlin.SetFrequency(n_PerlinFrequency);
+    n_Simplex.SetNoiseType(n_Simplex.NoiseType_OpenSimplex2);
+    n_Simplex.SetFrequency(n_SimplexFrequency);
+    n_Cellular.SetNoiseType(n_Cellular.NoiseType_Cellular);
+    n_Cellular.SetFrequency(n_CellularFrequency);
+
+
+
 	// Compile the vertex shader
 	ID3DBlob* pVSBlob = nullptr;
 	HRESULT hr = CompileShaderFromFile(L"shader.fx", "VS", "vs_4_0", &pVSBlob);
@@ -465,7 +503,7 @@ HRESULT		InitRunTimeParameters()
 	{
 		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT , D3D11_INPUT_PER_VERTEX_DATA, 0 },
 		{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT , D3D11_INPUT_PER_VERTEX_DATA, 0 },
-		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "COLOUR", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 	};
 	UINT numElements = ARRAYSIZE(layout);
 
@@ -526,11 +564,11 @@ HRESULT		InitRunTimeParameters()
 // ***************************************************************************************
 HRESULT		InitWorld(int width, int height)
 {
-    g_pCamera = new Camera(XMFLOAT3(0.0f, 750.0f, -3), XMFLOAT3(0, 0, 1), XMFLOAT3(0.0f, 1.0f, 0.0f));
+    g_pCamera = new Camera(XMFLOAT3(0.0f, 250.0f, -3), XMFLOAT3(0, 0, 1), XMFLOAT3(0.0f, 1.0f, 0.0f));
 
 	// Initialize the projection matrix
     constexpr float fovAngleY = XMConvertToRadians(60.0f);
-	g_Projection = XMMatrixPerspectiveFovLH(fovAngleY, width / (FLOAT)height, 0.01f, 100.0f);
+	g_Projection = XMMatrixPerspectiveFovLH(fovAngleY, width / (FLOAT)height, 0.01f, 10000.0f);
 
 	return S_OK;
 }
@@ -611,7 +649,7 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
     PAINTSTRUCT ps;
     HDC hdc;
 
-    float movement = 0.2f;
+    float movement = 10.0f;
     static bool mouseDown = false;
 
     extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -758,39 +796,125 @@ float calculateDeltaTime()
 
     return deltaTime;
 }
-void RenderDebugWindow(float deltaTime) {
-    ImGui::Begin("Debug Window");
-    ImGui::ColorEdit4("Colour", (float*)&light_colour);
-    ImGui::Text("Use the buttons to move the position!");
-    static float horizTime = 0;
-    static float vertTime = 0;
-    // Align buttons
-    if (ImGui::Button("Up")) {
-        vertTime += deltaTime;
-    }
 
-    ImGui::SameLine(); // Place next element horizontally
-    ImGui::Dummy(ImVec2(50.0f, 0.0f)); // Spacer
-    ImGui::SameLine();
-
-    if (ImGui::Button("Down")) {
-        vertTime -= deltaTime;
-    }
-
-    if (ImGui::Button("Left")) {
-        horizTime += deltaTime;
-    }
-
-    ImGui::SameLine();
-    ImGui::Dummy(ImVec2(50.0f, 0.0f)); // Spacer
-    ImGui::SameLine();
-
-    if (ImGui::Button("Right")) {
-        horizTime -= deltaTime;
-    }
-    obj_rotation = XMMatrixRotationX(vertTime) + XMMatrixRotationY(horizTime);
-    ImGui::End();
+float RatioValueConverter(float old_min, float old_max, float new_min, float new_max, float value)
+{
+    return (((value - old_min) / (old_max - old_min)) * (new_max - new_min) + new_min);
 }
+
+void GenerateNoise()
+{
+    n_pixels = new uint32_t[n_resolution_x * n_resolution_y];
+    memset(n_pixels, 0, sizeof(uint32_t) * n_resolution_x * n_resolution_y);
+
+    int count = 0;
+    for (int x = 0; x < n_resolution_x; x++) {
+        for (int y = 0; y < n_resolution_y; y++) {
+            int divideCount = 0;
+            float tempColour = 0;
+            if (n_PerlinOn) { tempColour += n_Perlin.GetNoise((float)x, (float)y); divideCount++; }
+            if (n_SimplexOn) { tempColour += n_Simplex.GetNoise((float)x, (float)y); divideCount++; }
+            if (n_CellularOn) { tempColour += n_Cellular.GetNoise((float)x, (float)y); divideCount++; }
+            tempColour = tempColour / divideCount;
+            int temp = (int)RatioValueConverter(-1.0f, 1.0f, 0.0f, 250.0f, tempColour);
+            OutputDebugStringA((to_string(temp) + "\n").c_str());
+
+            n_pixels[x + y * n_resolution_y] = (temp) | (temp << 8) | (temp << 16) | (0 << 24); //R | G | B | A
+            count++;
+        }
+    }
+
+    D3D11_SUBRESOURCE_DATA subrecData;
+    subrecData.pSysMem = n_pixels;
+    subrecData.SysMemPitch = n_resolution_x * sizeof(uint32_t);
+    subrecData.SysMemSlicePitch = 0;
+
+    D3D11_TEXTURE2D_DESC desc;
+    desc.Width = n_resolution_x;
+    desc.Height = n_resolution_y;
+    desc.MipLevels = desc.ArraySize = 1;
+    desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    desc.SampleDesc.Count = 1;
+    desc.SampleDesc.Quality = 0;
+    desc.Usage = D3D11_USAGE_DEFAULT; //or D3D11_USAGE_DYNAMIC for map/unmap
+    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    desc.CPUAccessFlags = 0; // D3D11_CPU_ACCESS_WRITE for dynamic usage
+    desc.MiscFlags = 0;
+
+    ID3D11Texture2D* texture;
+    g_pd3dDevice->CreateTexture2D(&desc, &subrecData, &texture);
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC srvd;
+    srvd.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    srvd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    srvd.Texture2D.MipLevels = 1;
+    srvd.Texture2D.MostDetailedMip = 0;
+
+    g_pd3dDevice->CreateShaderResourceView(texture, &srvd, &n_texture);
+}
+
+void RenderDebugWindow(float deltaTime) {
+    ImGui::Begin("Diamond Square Terrain");
+    ImGui::Text("");
+    ImGui::SliderInt("Detail(Size of the terrain)", &t_detail, 4, 10);
+    ImGui::SliderFloat("Roughness (Smoothness of terrain)", &t_roughness, 0, 1);
+    if (ImGui::Button("Generate"))
+    {
+        g_GameObject.setDetailRoughness(t_detail, t_roughness);
+        g_GameObject.generateTerrain();
+        g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
+    }
+    if (ImGui::Button("Print Vertices"))
+    {
+        g_GameObject.printVertices();
+    }
+    if (ImGui::Button("Print indices"))
+    {
+        g_GameObject.printIndicies();
+    }
+    ImGui::SliderInt("Cycles", &h_cycles, 1000, 100000);
+
+    if (ImGui::Button("Hydraulic Errosion"))
+    {
+        g_GameObject.hydraulicErosion(h_cycles);
+        g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
+
+    }
+    ImGui::End();
+
+    ImGui::Begin("Noise");
+    ImGui::Text("Noise Sliders");
+
+    ImGui::Checkbox("Perlin Noise", &n_PerlinOn);
+    if(ImGui::Button("New Perlin Seed"))
+    {
+        GenerateNoise();
+    }
+    ImGui::SliderFloat("Perlin Frequency", &n_PerlinFrequency, 0.1f, 1.0f);
+
+    ImGui::Checkbox("Simplex Noise", &n_SimplexOn);
+    if (ImGui::Button("New Simplex Seed"))
+    {
+        GenerateNoise();
+    }
+    ImGui::SliderFloat("Simplex Frequency", &n_SimplexFrequency, 0.1f, 1.0f);
+
+    ImGui::Checkbox("Cellular Noise", &n_CellularOn);
+    if (ImGui::Button("New Cellular Seed"))
+    {
+        GenerateNoise();
+    }
+    ImGui::SliderFloat("Cellular Frequency", &n_CellularFrequency, 0.1f, 1.0f);
+
+    ImGui::Image(n_texture, ImVec2(n_resolution_x, n_resolution_y));
+    if (ImGui::Button("Generate terrain with noise"))
+    {
+
+    }
+    ImGui::End();
+
+}
+
 //--------------------------------------------------------------------------------------
 // Render a frame
 //--------------------------------------------------------------------------------------

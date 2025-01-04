@@ -12,6 +12,7 @@
 #include <fstream>
 #include <vector>
 #include "TerrainGenDS.h";
+#include "HydraulicErosion.h";
 
 using namespace DirectX;
 
@@ -19,9 +20,9 @@ struct SimpleVertex
 {
 	XMFLOAT3 Pos;
 	XMFLOAT3 Normal;
-	XMFLOAT2 TexCoord;
+	XMFLOAT3 Colour;
 
-	SimpleVertex() : Pos(XMFLOAT3(0, 0, 0)), Normal(XMFLOAT3(0, 0, 0)), TexCoord(XMFLOAT2(0, 0)) {}
+	SimpleVertex() : Pos(XMFLOAT3(0, 0, 0)), Normal(XMFLOAT3(0, 0, 0)), Colour(XMFLOAT3(0.9f, 0.8f, 0.3f)) {}
 };
 
 class DrawableGameObject
@@ -31,6 +32,8 @@ public:
 	~DrawableGameObject();
 
 	void cleanup();
+
+	
 
 	HRESULT								initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceContext* pContext);
 	void								update(float t, ID3D11DeviceContext* pContext, XMMATRIX rotation);
@@ -42,6 +45,13 @@ public:
 	ID3D11SamplerState**				getTextureSamplerState() { return &m_pSamplerLinear; }
 	ID3D11Buffer*						getMaterialConstantBuffer() { return m_pMaterialConstantBuffer;}
 	void								setPosition(XMFLOAT3 position);
+	void								setDetailRoughness(int detail, float roughness);
+	
+	void								printIndicies();
+	void								printVertices();
+	void								hydraulicErosion(int cycles);
+	void								generateTerrain();
+	void								generateNoise();
 
 private:
 	
@@ -54,6 +64,16 @@ private:
 	MaterialPropertiesConstantBuffer	m_material;
 	ID3D11Buffer*						m_pMaterialConstantBuffer = nullptr;
 	XMFLOAT3							m_position;
-	INT									m_IndexCount;
+	INT									m_IndexCount = 0;
+
+	SimpleVertex*						m_verticesArray;
+	DWORD*								m_indicesArray;
+
+	INT									m_size;
+	INT									m_detail;
+	FLOAT								m_roughness;
+	std::vector<std::vector<float>>	m_map;
+	TerrainGenDS newTerrain;
+	HydraulicErosion hydraulicErosionClass;
 };
 

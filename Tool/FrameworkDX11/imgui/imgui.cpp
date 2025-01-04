@@ -178,7 +178,8 @@ CODE
    - If you need to share inputs between your game and the Dear ImGui interface, the easiest approach is to go all-or-nothing,
      with a buttons combo to toggle the target. Please reach out if you think the game vs navigation input sharing could be improved.
 
- - REMOTE INPUTS SHARING & MOUSE EMULATION
+ - REMOTE INPUTS SHARING & MOUSE E
+ ATION
    - PS4/PS5 users: Consider emulating a mouse cursor with DualShock touch pad or a spare analog stick as a mouse-emulation fallback.
    - Consoles/Tablet/Phone users: Consider using a Synergy 1.x server (on your PC) + run examples/libs/synergy/uSynergy.c (on your console/tablet/phone app)
      in order to share your PC mouse/keyboard.
