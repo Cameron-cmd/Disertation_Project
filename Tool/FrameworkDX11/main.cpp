@@ -75,7 +75,7 @@ int						g_viewHeight;
 
 DrawableGameObject		g_GameObject;
 
-ImVec4                  light_colour = ImVec4(0.9f, 0.7f, 0.03f, 0.2f);
+ImVec4                  light_colour = ImVec4(0.9f, 0.4f, 1.0f, 0.2f);
 XMMATRIX                obj_rotation = XMMatrixRotationX(0);
 
 // Terrain Values
@@ -84,14 +84,15 @@ int                     t_detail = 9;
 float                   t_roughness = 0.5;
 int                     h_cycles = 100;
 
+float                   n_Exponent = 1.0f;
+
 bool                    n_PerlinOn = true;
 float                   n_PerlinFrequency = 0.1f;
 bool                    n_SimplexOn = false;
 float                   n_SimplexFrequency = 0.1f;
 bool                    n_CellularOn = false;
 float                   n_CellularFrequency = 0.1f;
-int                     n_resolution_x = 1024;
-int                     n_resolution_y = 1024;
+int                     n_resolution = 256;
 
 uint32_t*               n_pixels;
 
@@ -101,7 +102,7 @@ FastNoiseLite           n_Cellular = FastNoiseLite();
 
 ID3D11ShaderResourceView* n_texture = nullptr;
 
-
+char                   s_fileName[32] = { "MeshFileName" };
 //--------------------------------------------------------------------------------------
 // Entry point to the program. Initializes everything and goes into a message processing 
 // loop. Idle time is used to render the scene.
@@ -234,6 +235,80 @@ HRESULT CompileShaderFromFile( const WCHAR* szFileName, LPCSTR szEntryPoint, LPC
     return S_OK;
 }
 
+float RatioValueConverter(float old_min, float old_max, float new_min, float new_max, float value)
+{
+    return (((value - old_min) / (old_max - old_min)) * (new_max - new_min) + new_min);
+}
+
+int RandomSeed()
+{
+    std::random_device dev;
+    std::mt19937 rng(dev());
+    std::uniform_int_distribution<std::mt19937::result_type> dis(1, 10000);
+    return dis(rng);
+}
+
+void GenerateNoise()
+{
+    if (n_pixels) {
+        delete[] n_pixels;
+    }
+    n_pixels = new uint32_t[n_resolution * n_resolution];
+    memset(n_pixels, 0, sizeof(uint32_t) * n_resolution * n_resolution);
+
+    for (int x = 0; x < n_resolution; x++) {
+        for (int y = 0; y < n_resolution; y++) {
+            float divideCount = 0;
+            float tempColour = 0;
+            if (n_PerlinOn) { tempColour += n_Perlin.GetNoise((float)x, (float)y); divideCount += 1; }
+            if (n_SimplexOn) { tempColour += 0.5 * n_Simplex.GetNoise((float)x, (float)y); divideCount += 0.5; }
+            if (n_CellularOn) { tempColour += 0.25 * n_Cellular.GetNoise((float)x, (float)y); divideCount += 0.25; }
+            tempColour = tempColour / max(1, divideCount); // Avoid divide by zero
+            int temp = (int)RatioValueConverter(-1.0f, 1.0f, 0.0f, 250.0f, tempColour);
+            temp = max(0, min(255, temp)); // Clamp for safety
+            n_pixels[x + y * n_resolution] = (temp) | (temp << 8) | (temp << 16) | (255 << 24);
+        }
+    }
+
+    if (n_texture) {
+        n_texture->Release();
+        n_texture = nullptr;
+    }
+
+    D3D11_SUBRESOURCE_DATA subrecData = {};
+    subrecData.pSysMem = n_pixels;
+    subrecData.SysMemPitch = n_resolution * sizeof(uint32_t);
+
+    D3D11_TEXTURE2D_DESC desc = {};
+    desc.Width = n_resolution;
+    desc.Height = n_resolution;
+    desc.MipLevels = desc.ArraySize = 1;
+    desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    desc.SampleDesc.Count = 1;
+    desc.Usage = D3D11_USAGE_DEFAULT;
+    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+    ID3D11Texture2D* texture = nullptr;
+    HRESULT hr = g_pd3dDevice->CreateTexture2D(&desc, &subrecData, &texture);
+    if (FAILED(hr)) {
+        OutputDebugStringA("Failed to create texture\n");
+        return;
+    }
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC srvd = {};
+    srvd.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    srvd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    srvd.Texture2D.MipLevels = 1;
+
+    hr = g_pd3dDevice->CreateShaderResourceView(texture, &srvd, &n_texture);
+    if (FAILED(hr)) {
+        texture->Release();
+        return;
+    }
+
+    texture->Release();
+
+}
 
 //--------------------------------------------------------------------------------------
 // Create Direct3D device and swap chain
@@ -452,9 +527,6 @@ HRESULT InitDevice()
 			L"Failed to initialise world.", L"Error", MB_OK);
 		return hr;
 	}
-    g_GameObject.setDetailRoughness(t_detail, t_roughness);
-    g_GameObject.generateTerrain();
-	hr = g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
 	if (FAILED(hr))
     {
         MessageBox(nullptr,
@@ -477,12 +549,16 @@ HRESULT		InitRunTimeParameters()
     n_Simplex.SetFrequency(n_SimplexFrequency);
     n_Cellular.SetNoiseType(n_Cellular.NoiseType_Cellular);
     n_Cellular.SetFrequency(n_CellularFrequency);
+    GenerateNoise();
 
+    g_GameObject.setDetailRoughness(t_detail, t_roughness);
+    g_GameObject.generateTerrain();
+    HRESULT hr = g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
 
 
 	// Compile the vertex shader
 	ID3DBlob* pVSBlob = nullptr;
-	HRESULT hr = CompileShaderFromFile(L"shader.fx", "VS", "vs_4_0", &pVSBlob);
+	hr = CompileShaderFromFile(L"shader.fx", "VS", "vs_4_0", &pVSBlob);
 	if (FAILED(hr))
 	{
 		MessageBox(nullptr,
@@ -564,7 +640,8 @@ HRESULT		InitRunTimeParameters()
 // ***************************************************************************************
 HRESULT		InitWorld(int width, int height)
 {
-    g_pCamera = new Camera(XMFLOAT3(0.0f, 250.0f, -3), XMFLOAT3(0, 0, 1), XMFLOAT3(0.0f, 1.0f, 0.0f));
+    float val = pow(2, t_detail) * 1.5;
+    g_pCamera = new Camera(XMFLOAT3(val, val, val), XMFLOAT3(-1, -1, -1), XMFLOAT3(0.0f, 1.0f, 0.0f));
 
 	// Initialize the projection matrix
     constexpr float fovAngleY = XMConvertToRadians(60.0f);
@@ -677,6 +754,12 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
         case 'D':
             g_pCamera->StrafeRight(movement);  // Adjust distance as needed
             break;
+        case 'E':
+            g_pCamera->MoveUpward(movement);
+            break;
+        case 'Q':
+            g_pCamera->MoveDownward(movement);
+            break;
         }
         break;
 
@@ -753,17 +836,17 @@ void setupLightForRender()
     light.Enabled = static_cast<int>(true);
     light.LightType = PointLight;
     light.Color = XMFLOAT4(Colors::White);
-    light.SpotAngle = XMConvertToRadians(45.0f);
+    //light.SpotAngle = XMConvertToRadians(360.0f);
     light.ConstantAttenuation = 1.0f;
-    light.LinearAttenuation = 1;
-    light.QuadraticAttenuation = 1;
+    light.LinearAttenuation = 0.05f;
+    light.QuadraticAttenuation = 0.01f;
 
     // set up the light
-    XMFLOAT4 LightPosition(g_pCamera->GetPosition().x, g_pCamera->GetPosition().y, g_pCamera->GetPosition().z, 1);
+    XMFLOAT4 LightPosition(-g_pCamera->GetPosition().x, -g_pCamera->GetPosition().y, -g_pCamera->GetPosition().z, 1);
     light.Position = LightPosition;
-    XMVECTOR LightDirection = XMVectorSet(-LightPosition.x, -LightPosition.y, -LightPosition.z, 0.0f);
-    LightDirection = XMVector3Normalize(LightDirection);
-    XMStoreFloat4(&light.Direction, LightDirection);
+    //XMVECTOR LightDirection = XMVectorSet(-LightPosition.x, -LightPosition.y, -LightPosition.z, 0.0f);
+    //LightDirection = XMVector3Normalize(LightDirection);
+    //XMStoreFloat4(&light.Direction, LightDirection);
 
     LightPropertiesConstantBuffer lightProperties;
     lightProperties.EyePosition = LightPosition;
@@ -797,121 +880,176 @@ float calculateDeltaTime()
     return deltaTime;
 }
 
-float RatioValueConverter(float old_min, float old_max, float new_min, float new_max, float value)
+void saveTerrain()
 {
-    return (((value - old_min) / (old_max - old_min)) * (new_max - new_min) + new_min);
-}
+    std::string fileName = std::string(s_fileName) + ".obj";
+    ofstream myfile(fileName);
+    int CountVertices = 0;
+    int CountIndices = 0;
+    int IndexCount = g_GameObject.GetIndexCount();
+    SimpleVertex* SV = g_GameObject.GetVertices();
+    DWORD* Faces = g_GameObject.GetIndices();
+    int size = g_GameObject.GetSize();
+    if (myfile)
+    {
+        for (int x = 0; x < size; x++) {
+            for (int y = 0; y < size; y++) {
+                myfile << "v " << SV[CountVertices].Pos.x << ' ' << SV[CountVertices].Pos.y << ' ' << SV[CountVertices].Pos.z << "\n";
+                myfile << "vn " << SV[CountVertices].Normal.x << ' ' << SV[CountVertices].Normal.y << ' ' << SV[CountVertices].Normal.z << "\n";
+                CountVertices++;
+            }
+        }
 
-void GenerateNoise()
-{
-    n_pixels = new uint32_t[n_resolution_x * n_resolution_y];
-    memset(n_pixels, 0, sizeof(uint32_t) * n_resolution_x * n_resolution_y);
-
-    int count = 0;
-    for (int x = 0; x < n_resolution_x; x++) {
-        for (int y = 0; y < n_resolution_y; y++) {
-            int divideCount = 0;
-            float tempColour = 0;
-            if (n_PerlinOn) { tempColour += n_Perlin.GetNoise((float)x, (float)y); divideCount++; }
-            if (n_SimplexOn) { tempColour += n_Simplex.GetNoise((float)x, (float)y); divideCount++; }
-            if (n_CellularOn) { tempColour += n_Cellular.GetNoise((float)x, (float)y); divideCount++; }
-            tempColour = tempColour / divideCount;
-            int temp = (int)RatioValueConverter(-1.0f, 1.0f, 0.0f, 250.0f, tempColour);
-            OutputDebugStringA((to_string(temp) + "\n").c_str());
-
-            n_pixels[x + y * n_resolution_y] = (temp) | (temp << 8) | (temp << 16) | (0 << 24); //R | G | B | A
-            count++;
+        while(CountIndices < IndexCount) {
+            myfile << "f " << Faces[CountIndices]+1 << ' ' << Faces[CountIndices+1]+1 << ' ' << Faces[CountIndices+2]+1 << "\n";
+            CountIndices += 3;
         }
     }
-
-    D3D11_SUBRESOURCE_DATA subrecData;
-    subrecData.pSysMem = n_pixels;
-    subrecData.SysMemPitch = n_resolution_x * sizeof(uint32_t);
-    subrecData.SysMemSlicePitch = 0;
-
-    D3D11_TEXTURE2D_DESC desc;
-    desc.Width = n_resolution_x;
-    desc.Height = n_resolution_y;
-    desc.MipLevels = desc.ArraySize = 1;
-    desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    desc.SampleDesc.Count = 1;
-    desc.SampleDesc.Quality = 0;
-    desc.Usage = D3D11_USAGE_DEFAULT; //or D3D11_USAGE_DYNAMIC for map/unmap
-    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-    desc.CPUAccessFlags = 0; // D3D11_CPU_ACCESS_WRITE for dynamic usage
-    desc.MiscFlags = 0;
-
-    ID3D11Texture2D* texture;
-    g_pd3dDevice->CreateTexture2D(&desc, &subrecData, &texture);
-
-    D3D11_SHADER_RESOURCE_VIEW_DESC srvd;
-    srvd.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    srvd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-    srvd.Texture2D.MipLevels = 1;
-    srvd.Texture2D.MostDetailedMip = 0;
-
-    g_pd3dDevice->CreateShaderResourceView(texture, &srvd, &n_texture);
 }
 
+void GenerateTerrainWithNoise()
+{
+    std::vector<std::vector<float>> map(n_resolution, std::vector<float>(n_resolution));
+    for (int x = 0; x < n_resolution - 1; x++) {
+
+        for (int y = 0; y < n_resolution - 1; y++) {
+            float divideCount = 0;
+            float tempColour = 0;
+            if (n_PerlinOn) { tempColour += n_Perlin.GetNoise((float)x, (float)y); divideCount += 1; }
+            if (n_SimplexOn) { tempColour += n_Simplex.GetNoise((float)x, (float)y); divideCount += 0.5; }
+            if (n_CellularOn) { tempColour += n_Cellular.GetNoise((float)x, (float)y); divideCount += 0.25; }
+            tempColour = tempColour / max(1, divideCount); // Avoid divide by zero
+            float temp = RatioValueConverter(-1.0f, 1.0f, 0.0f, 1.0f, tempColour);
+            temp = pow(temp, n_Exponent);
+            temp = RatioValueConverter(0.0f, 1.0f, 0.0f, 250.0f, temp);
+            map[x][y] = temp;
+        }
+    }
+    g_GameObject.noiseGenerateTerrain(&map, n_resolution);
+    g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
+}
+
+
 void RenderDebugWindow(float deltaTime) {
-    ImGui::Begin("Diamond Square Terrain");
+    static float height = 0;
+    static float width = 0;
+    ImGui::SetNextWindowPos(ImVec2(10, 10));
+    ImGui::Begin("Diamond Square Terrain", 0, ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::Text("");
     ImGui::SliderInt("Detail(Size of the terrain)", &t_detail, 4, 10);
-    ImGui::SliderFloat("Roughness (Smoothness of terrain)", &t_roughness, 0, 1);
+    ImGui::SliderFloat("Roughness (0 - flat, 1 - very jagged)", &t_roughness, 0, 1);
     if (ImGui::Button("Generate"))
     {
         g_GameObject.setDetailRoughness(t_detail, t_roughness);
         g_GameObject.generateTerrain();
         g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
     }
-    if (ImGui::Button("Print Vertices"))
-    {
-        g_GameObject.printVertices();
-    }
-    if (ImGui::Button("Print indices"))
-    {
-        g_GameObject.printIndicies();
-    }
-    ImGui::SliderInt("Cycles", &h_cycles, 1000, 100000);
+    ImGui::SliderInt("Cycles", &h_cycles, 100, 5000);
 
     if (ImGui::Button("Hydraulic Errosion"))
     {
         g_GameObject.hydraulicErosion(h_cycles);
         g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
+    }
+    height = ImGui::GetWindowHeight();
+    width = ImGui::GetWindowWidth();
+    ImGui::End();
+    
+    ImGui::SetNextWindowPos(ImVec2(10, 10 + (int)height));
+    ImGui::Begin("Noise", 0, ImGuiWindowFlags_AlwaysAutoResize);
+    ImGui::Text("Noise Size");
+    ImGui::InputInt("Widght and Height Value", &n_resolution);
+
+    if (ImGui::SliderFloat("Redistribution", &n_Exponent, 0.01f, 10.0f))
+    {
+        GenerateTerrainWithNoise();
+    }
+    if (ImGui::SliderFloat("Height", new float(), 0, 1000))
+    {
 
     }
-    ImGui::End();
+    if (ImGui::SliderFloat("Floor/Sea Level", new float(), 0, 1000))
+    {
 
-    ImGui::Begin("Noise");
+    }
     ImGui::Text("Noise Sliders");
-
-    ImGui::Checkbox("Perlin Noise", &n_PerlinOn);
+    if (ImGui::Checkbox("Perlin Noise", &n_PerlinOn))
+    {
+        GenerateNoise();
+    };
     if(ImGui::Button("New Perlin Seed"))
     {
+        n_Perlin.SetSeed(RandomSeed());
         GenerateNoise();
     }
-    ImGui::SliderFloat("Perlin Frequency", &n_PerlinFrequency, 0.1f, 1.0f);
+    if (ImGui::SliderFloat("Perlin Frequency", &n_PerlinFrequency, 0.001f, 1.0f))
+    {
+        n_Perlin.SetFrequency(n_PerlinFrequency);
+        GenerateNoise();
+    }
 
-    ImGui::Checkbox("Simplex Noise", &n_SimplexOn);
+    if (ImGui::Checkbox("Simplex Noise", &n_SimplexOn)) 
+    {
+        GenerateNoise();
+    };
     if (ImGui::Button("New Simplex Seed"))
     {
+        n_Simplex.SetSeed(RandomSeed());
         GenerateNoise();
     }
-    ImGui::SliderFloat("Simplex Frequency", &n_SimplexFrequency, 0.1f, 1.0f);
+    if (ImGui::SliderFloat("Simplex Frequency", &n_SimplexFrequency, 0.001f, 1.0f))
+    {
+        n_Simplex.SetFrequency(n_SimplexFrequency);
+        GenerateNoise();
+    }
 
-    ImGui::Checkbox("Cellular Noise", &n_CellularOn);
+    if (ImGui::Checkbox("Cellular Noise", &n_CellularOn)) 
+    {
+        GenerateNoise();
+    };
     if (ImGui::Button("New Cellular Seed"))
     {
+        n_Cellular.SetSeed(RandomSeed());
         GenerateNoise();
     }
-    ImGui::SliderFloat("Cellular Frequency", &n_CellularFrequency, 0.1f, 1.0f);
-
-    ImGui::Image(n_texture, ImVec2(n_resolution_x, n_resolution_y));
+    if (ImGui::SliderFloat("Cellular Frequency", &n_CellularFrequency, 0.001f, 1.0f)) 
+    {
+        n_Cellular.SetFrequency(n_CellularFrequency);
+        GenerateNoise();
+    };
+    if (n_texture == nullptr) {
+        OutputDebugStringA("n_texture is null before ImGui::Image\n");
+    }
     if (ImGui::Button("Generate terrain with noise"))
     {
+        GenerateTerrainWithNoise();
+    }
+    ImGui::Image((ImTextureID)(intptr_t)n_texture, ImVec2(384, 384));
+    ImGui::End();
 
+    ImGui::SetNextWindowPos(ImVec2(10 + (int)width, 10));
+    ImGui::Begin("File", 0, ImGuiWindowFlags_AlwaysAutoResize);
+    ImGui::InputText("FileName", s_fileName, 32);
+    if (ImGui::Button("Save")) 
+    {
+        saveTerrain();
+    }
+    height = ImGui::GetWindowHeight();
+    ImGui::End();
+
+    ImGui::SetNextWindowPos(ImVec2(10 + (int)width, 10 + (int)height));
+    ImGui::Begin("Debug", 0, ImGuiWindowFlags_AlwaysAutoResize);
+    ImGui::Text("Camera Position: %.2f, %.2f, %.2f", g_pCamera->GetPosition().x, g_pCamera->GetPosition().y, g_pCamera->GetPosition().z);
+    if (ImGui::Button("Print Vertices"))
+    {
+       g_GameObject.printVertices();
+    }
+    if (ImGui::Button("Print indices"))
+    {
+        g_GameObject.printIndicies();
     }
     ImGui::End();
+
 
 }
 

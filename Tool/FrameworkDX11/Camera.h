@@ -19,8 +19,23 @@ public:
 
         XMStoreFloat4x4(&viewMatrix, XMMatrixIdentity());
     }
-
+    void SetPosition(XMFLOAT3 pos) { position = pos; }
     XMFLOAT3 GetPosition() { return position; }
+
+    void MoveUpward(float distance)
+    {
+        // Get the current up vector
+        XMVECTOR upVec = XMLoadFloat3(&up);
+        XMVECTOR posVec = XMLoadFloat3(&position);
+
+        // Move upwards by adding the scaled up vector to the position
+        XMStoreFloat3(&position, XMVectorMultiplyAdd(XMVectorReplicate(distance), upVec, posVec));
+    }
+
+    void MoveDownward(float distance)
+    {
+        MoveUpward(-distance);
+    }
 
     void MoveForward(float distance)
     {

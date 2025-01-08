@@ -22,7 +22,7 @@ struct SimpleVertex
 	XMFLOAT3 Normal;
 	XMFLOAT3 Colour;
 
-	SimpleVertex() : Pos(XMFLOAT3(0, 0, 0)), Normal(XMFLOAT3(0, 0, 0)), Colour(XMFLOAT3(0.9f, 0.8f, 0.3f)) {}
+	SimpleVertex() : Pos(XMFLOAT3(0, 0, 0)), Normal(XMFLOAT3(0, 0, 0)), Colour(XMFLOAT3(0.5f, 0.8f, 0.3f)) {}
 };
 
 class DrawableGameObject
@@ -51,8 +51,12 @@ public:
 	void								printVertices();
 	void								hydraulicErosion(int cycles);
 	void								generateTerrain();
-	void								generateNoise();
-
+	void								noiseGenerateTerrain(std::vector<std::vector<float>>* pMap, int size);
+	float								RatioValueConverter(float old_min, float old_max, float new_min, float new_max, float value);
+	SimpleVertex*						GetVertices() { return m_verticesArray; }
+	DWORD*								GetIndices() { return m_indicesArray; }
+	INT									GetSize() { return m_size; }
+	INT									GetIndexCount() { return m_IndexCount; }
 private:
 	
 	XMFLOAT4X4							m_World;
@@ -70,10 +74,11 @@ private:
 	DWORD*								m_indicesArray;
 
 	INT									m_size;
+	INT									m_max;
 	INT									m_detail;
 	FLOAT								m_roughness;
-	std::vector<std::vector<float>>	m_map;
-	TerrainGenDS newTerrain;
-	HydraulicErosion hydraulicErosionClass;
+	std::vector<std::vector<float>>		m_map;
+	TerrainGenDS						newTerrain;
+	HydraulicErosion					hydraulicErosionClass;
 };
 

@@ -70,12 +70,20 @@ void DrawableGameObject::hydraulicErosion(int cycles)
 	m_map = hydraulicErosionClass.Erode(m_map, cycles, m_size);
 }
 
+void DrawableGameObject::noiseGenerateTerrain(std::vector<std::vector<float>>* pMap, int size)
+{
+	m_map = *pMap;
+	m_size = size - 1;
+	m_max = size - 2;
+}
+
 void DrawableGameObject::generateTerrain()
 {
 	newTerrain = TerrainGenDS(m_detail);
 	newTerrain.Generate(m_roughness);
 	m_map = newTerrain._map;
 	m_size = newTerrain._size;
+	m_max = newTerrain._max;
 }
 
 void DrawableGameObject::printIndicies()
@@ -92,9 +100,9 @@ void DrawableGameObject::printIndicies()
 	}
 }
 
-void DrawableGameObject::generateNoise()
+float DrawableGameObject::RatioValueConverter(float old_min, float old_max, float new_min, float new_max, float value)
 {
-
+	return (((value - old_min) / (old_max - old_min)) * (new_max - new_min) + new_min);
 }
 
 HRESULT DrawableGameObject::initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceContext* pContext)
@@ -104,19 +112,20 @@ HRESULT DrawableGameObject::initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceConte
 	SimpleVertex* vertices{};
 	DWORD* indices{};
 
-	vertexCount = newTerrain._size * newTerrain._size;
-	indexCount = ((newTerrain._size - 1) * (newTerrain._size - 1) * 6) - (newTerrain._size - 1) * 12;
+	vertexCount = m_size * m_size;
+	indexCount = (((m_size-1) * 2) * (m_size - 1)) * 3;
 	vertices = new SimpleVertex[vertexCount];
 	indices = new DWORD[indexCount];
 	m_IndexCount = indexCount;
 	int count = 0;
-	for (int x = 0; x < newTerrain._size; x++)
+	for (int x = 0; x < m_size; x++)
 	{
-		for (int y = 0; y < newTerrain._size; y++)
+		for (int y = 0; y < m_size; y++)
 		{
 			SimpleVertex SV;
-			SV.Pos = XMFLOAT3(x,y,m_map[x][y]);
-			SV.Normal = XMFLOAT3(0, 0, 0);
+			SV.Pos = XMFLOAT3(x, m_map[x][y], y);
+			float temp = RatioValueConverter(0, m_size, 0.0f, 0.6f, m_map[x][y]);
+			SV.Colour = XMFLOAT3(temp, temp, temp);
 			vertices[count] = SV;
 			count++;
 		}
@@ -129,16 +138,16 @@ HRESULT DrawableGameObject::initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceConte
 	while (count < indexCount)
 	{
 		//OutputDebugStringA((to_string(count) + "\n").c_str());
-		if (ind1 % newTerrain._max == remainder && ind1 != 0) { ind1++; ind2++; remainder++;}
+		if (ind1 % m_max == remainder && ind1 != 0) { ind1++; ind2++; remainder++;}
 		indices[count] = (DWORD)ind1;
 		count++;
 		indices[count] = (DWORD)ind2;
 		count++;
-		indices[count] = (DWORD)(ind2 + newTerrain._size-1);
+		indices[count] = (DWORD)(ind2 + m_size -1);
 		count++;
 		XMFLOAT3 edgef1 = XMFLOAT3(vertices[ind1].Pos.x - vertices[ind2].Pos.x, vertices[ind1].Pos.y - vertices[ind2].Pos.y, vertices[ind1].Pos.z - vertices[ind2].Pos.z);
 		XMVECTOR edge1 = XMLoadFloat3(&edgef1);
-		XMFLOAT3 edgef2 = XMFLOAT3(vertices[ind1].Pos.x - vertices[ind2 + newTerrain._size - 1].Pos.x, vertices[ind1].Pos.y - vertices[ind2 + newTerrain._size - 1].Pos.y, vertices[ind1].Pos.z - vertices[ind2 + newTerrain._size - 1].Pos.z);
+		XMFLOAT3 edgef2 = XMFLOAT3(vertices[ind1].Pos.x - vertices[ind2 + m_size - 1].Pos.x, vertices[ind1].Pos.y - vertices[ind2 + m_size - 1].Pos.y, vertices[ind1].Pos.z - vertices[ind2 + m_size - 1].Pos.z);
 		XMVECTOR edge2 = XMLoadFloat3(&edgef1);
 		XMVECTOR normal = edge1 * edge2;
 		normal = XMVector3Normalize(normal);
@@ -146,34 +155,34 @@ HRESULT DrawableGameObject::initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceConte
 
 		vertices[ind1].Normal = XMFLOAT3(normFloat.x + vertices[ind1].Normal.x, normFloat.y + vertices[ind1].Normal.y, normFloat.z + vertices[ind1].Normal.z);
 		vertices[ind2].Normal = XMFLOAT3(normFloat.x + vertices[ind2].Normal.x, normFloat.y + vertices[ind2].Normal.y, normFloat.z + vertices[ind2].Normal.z);
-		vertices[ind2 + newTerrain._size - 1].Normal = XMFLOAT3(normFloat.x + vertices[ind2 + newTerrain._size - 1].Normal.x, normFloat.y + vertices[ind2 + newTerrain._size - 1].Normal.y, normFloat.z + vertices[ind2 + newTerrain._size - 1].Normal.z);
+		vertices[ind2 + m_size - 1].Normal = XMFLOAT3(normFloat.x + vertices[ind2 + m_size - 1].Normal.x, normFloat.y + vertices[ind2 + m_size - 1].Normal.y, normFloat.z + vertices[ind2 + m_size - 1].Normal.z);
 
 		indices[count] = (DWORD)(ind2);
 		count++;
-		indices[count] = (DWORD)(ind2 + newTerrain._size);
+		indices[count] = (DWORD)(ind2 + m_size);
 		count++;
-		indices[count] = (DWORD)(ind2 + newTerrain._size - 1);
+		indices[count] = (DWORD)(ind2 + m_size - 1);
 		count++;
 
-		edgef1 = XMFLOAT3(vertices[ind2].Pos.x - vertices[ind2 + newTerrain._size].Pos.x, vertices[ind2].Pos.y - vertices[ind2 + newTerrain._size].Pos.y, vertices[ind2].Pos.z - vertices[ind2 + newTerrain._size].Pos.z);
+		edgef1 = XMFLOAT3(vertices[ind2].Pos.x - vertices[ind2 + m_size].Pos.x, vertices[ind2].Pos.y - vertices[ind2 + m_size].Pos.y, vertices[ind2].Pos.z - vertices[ind2 + m_size].Pos.z);
 		edge1 = XMLoadFloat3(&edgef1);
-		edgef2 = XMFLOAT3(vertices[ind2].Pos.x - vertices[ind2 + newTerrain._size - 1].Pos.x, vertices[ind2].Pos.y - vertices[ind2 + newTerrain._size - 1].Pos.y, vertices[ind2].Pos.z - vertices[ind2 + newTerrain._size - 1].Pos.z);
+		edgef2 = XMFLOAT3(vertices[ind2].Pos.x - vertices[ind2 + m_size - 1].Pos.x, vertices[ind2].Pos.y - vertices[ind2 + m_size - 1].Pos.y, vertices[ind2].Pos.z - vertices[ind2 + m_size - 1].Pos.z);
 		edge2 = XMLoadFloat3(&edgef2);
 		normal = edge1 * edge2;
 		normal = XMVector3Normalize(normal);
 		normFloat = XMFLOAT3(XMVectorGetX(normal), XMVectorGetY(normal), XMVectorGetZ(normal));
 
 		vertices[ind2].Normal = XMFLOAT3(normFloat.x + vertices[ind1].Normal.x, normFloat.y + vertices[ind1].Normal.y, normFloat.z + vertices[ind1].Normal.z);
-		vertices[ind2 + newTerrain._size].Normal = XMFLOAT3(normFloat.x + vertices[ind2].Normal.x, normFloat.y + vertices[ind2].Normal.y, normFloat.z + vertices[ind2].Normal.z);
-		vertices[ind2 + newTerrain._size - 1].Normal = XMFLOAT3(normFloat.x + vertices[ind2 + newTerrain._size - 1].Normal.x, normFloat.y + vertices[ind2 + newTerrain._size - 1].Normal.y, normFloat.z + vertices[ind2 + newTerrain._size - 1].Normal.z);
+		vertices[ind2 + m_size].Normal = XMFLOAT3(normFloat.x + vertices[ind2].Normal.x, normFloat.y + vertices[ind2].Normal.y, normFloat.z + vertices[ind2].Normal.z);
+		vertices[ind2 + m_size - 1].Normal = XMFLOAT3(normFloat.x + vertices[ind2 + m_size - 1].Normal.x, normFloat.y + vertices[ind2 + m_size - 1].Normal.y, normFloat.z + vertices[ind2 + m_size - 1].Normal.z);
 
 		ind1 += 1;
 		ind2 += 1;
 	}
 	count = 0;
-	for (int x = 0; x < newTerrain._size; x++)
+	for (int x = 0; x < m_size; x++)
 	{
-		for (int y = 0; y < newTerrain._size; y++)
+		for (int y = 0; y < m_size; y++)
 		{
 			XMVECTOR temp = XMVector3Normalize(XMVECTOR(XMLoadFloat3(&vertices[count].Normal)));
 			vertices[count].Normal = XMFLOAT3(XMVectorGetX(temp*-1), XMVectorGetY(temp*-1), XMVectorGetZ(temp*-1));

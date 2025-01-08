@@ -89,7 +89,6 @@ struct PS_INPUT
 	float4 worldPos : POSITION;
 	float3 Norm : NORMAL;
 	float3 Colour : COLOUR0;
-	
 };
 
 
