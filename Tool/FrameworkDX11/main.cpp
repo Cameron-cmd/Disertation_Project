@@ -964,14 +964,14 @@ void RenderDebugWindow(float deltaTime) {
     {
         GenerateTerrainWithNoise();
     }
-    if (ImGui::SliderFloat("Height", new float(), 0, 1000))
-    {
+    //if (ImGui::SliderFloat("Height", new float(), 0, 1000))
+    //{
 
-    }
-    if (ImGui::SliderFloat("Floor/Sea Level", new float(), 0, 1000))
-    {
+    //}
+    //if (ImGui::SliderFloat("Floor/Sea Level", new float(), 0, 1000))
+    //{
 
-    }
+    //}
     ImGui::Text("Noise Sliders");
     if (ImGui::Checkbox("Perlin Noise", &n_PerlinOn))
     {
@@ -982,10 +982,11 @@ void RenderDebugWindow(float deltaTime) {
         n_Perlin.SetSeed(RandomSeed());
         GenerateNoise();
     }
-    if (ImGui::SliderFloat("Perlin Frequency", &n_PerlinFrequency, 0.001f, 1.0f))
+    if (ImGui::SliderFloat("Perlin Frequency", &n_PerlinFrequency, 0.01f, 1.0f))
     {
-        n_Perlin.SetFrequency(n_PerlinFrequency);
+        n_Perlin.SetFrequency(n_PerlinFrequency/10);
         GenerateNoise();
+        GenerateTerrainWithNoise();
     }
 
     if (ImGui::Checkbox("Simplex Noise", &n_SimplexOn)) 
@@ -997,10 +998,11 @@ void RenderDebugWindow(float deltaTime) {
         n_Simplex.SetSeed(RandomSeed());
         GenerateNoise();
     }
-    if (ImGui::SliderFloat("Simplex Frequency", &n_SimplexFrequency, 0.001f, 1.0f))
+    if (ImGui::SliderFloat("Simplex Frequency", &n_SimplexFrequency, 0.01f, 1.0f))
     {
-        n_Simplex.SetFrequency(n_SimplexFrequency);
+        n_Simplex.SetFrequency(n_SimplexFrequency/10);
         GenerateNoise();
+        GenerateTerrainWithNoise();
     }
 
     if (ImGui::Checkbox("Cellular Noise", &n_CellularOn)) 
@@ -1012,10 +1014,11 @@ void RenderDebugWindow(float deltaTime) {
         n_Cellular.SetSeed(RandomSeed());
         GenerateNoise();
     }
-    if (ImGui::SliderFloat("Cellular Frequency", &n_CellularFrequency, 0.001f, 1.0f)) 
+    if (ImGui::SliderFloat("Cellular Frequency", &n_CellularFrequency, 0.01f, 1.0f)) 
     {
-        n_Cellular.SetFrequency(n_CellularFrequency);
+        n_Cellular.SetFrequency(n_CellularFrequency/10);
         GenerateNoise();
+        GenerateTerrainWithNoise();
     };
     if (n_texture == nullptr) {
         OutputDebugStringA("n_texture is null before ImGui::Image\n");
@@ -1040,14 +1043,14 @@ void RenderDebugWindow(float deltaTime) {
     ImGui::SetNextWindowPos(ImVec2(10 + (int)width, 10 + (int)height));
     ImGui::Begin("Debug", 0, ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::Text("Camera Position: %.2f, %.2f, %.2f", g_pCamera->GetPosition().x, g_pCamera->GetPosition().y, g_pCamera->GetPosition().z);
-    if (ImGui::Button("Print Vertices"))
-    {
-       g_GameObject.printVertices();
-    }
-    if (ImGui::Button("Print indices"))
-    {
-        g_GameObject.printIndicies();
-    }
+    //if (ImGui::Button("Print Vertices"))
+    //{
+    //   g_GameObject.printVertices();
+    //}
+    //if (ImGui::Button("Print indices"))
+    //{
+    //    g_GameObject.printIndicies();
+    //}
     ImGui::End();
 
 

@@ -22,9 +22,9 @@ private:
 
     XMVECTOR surNormCalc(float a, float x, float y, float z)
     {
-        XMVECTOR vec1 = XMLoadFloat3(new XMFLOAT3(a, a, a));
-        XMVECTOR vec2 = XMLoadFloat3(new XMFLOAT3(x, y, z));
-        return vec1 * XMVector3Normalize(vec2);
+        XMFLOAT3 vec1(a, a, a);
+        XMFLOAT3 vec2(x, y, z);
+        return XMLoadFloat3(&vec1) * XMVector3Normalize(XMLoadFloat3(&vec2));
     }
 
     XMFLOAT3 surfaceNormal(int i, int j)
