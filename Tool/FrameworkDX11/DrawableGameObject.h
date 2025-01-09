@@ -52,7 +52,7 @@ public:
 	void								hydraulicErosion(int cycles);
 	void								generateTerrain();
 	void								noiseGenerateTerrain(std::vector<std::vector<float>>* pMap, int size);
-	float								RatioValueConverter(float old_min, float old_max, float new_min, float new_max, float value);
+	float								RatioValueConverter(float old_min, float old_max, float _min, float new_max, float value);
 	SimpleVertex*						GetVertices() { return m_verticesArray; }
 	DWORD*								GetIndices() { return m_indicesArray; }
 	INT									GetSize() { return m_size; }

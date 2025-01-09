@@ -107,6 +107,9 @@ float DrawableGameObject::RatioValueConverter(float old_min, float old_max, floa
 
 HRESULT DrawableGameObject::initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceContext* pContext)
 {
+	if (m_indicesArray) { delete[] m_indicesArray;  m_indicesArray = nullptr; }
+	if (m_verticesArray) { delete[] m_verticesArray;  m_verticesArray = nullptr; }
+
 	int vertexCount = 0;
 	int indexCount = 0;
 	SimpleVertex* vertices{};
@@ -299,8 +302,6 @@ HRESULT DrawableGameObject::initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceConte
 	bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
 	bd.CPUAccessFlags = 0;
 	hr = pd3dDevice->CreateBuffer(&bd, nullptr, &m_pMaterialConstantBuffer);
-	delete[] vertices;
-	delete[] indices;
 	if (FAILED(hr))
 		return hr;
 

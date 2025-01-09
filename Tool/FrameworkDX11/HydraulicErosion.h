@@ -56,13 +56,13 @@ public:
     HydraulicErosion() {};
     std::vector<std::vector<float>> Erode(std::vector<std::vector<float>> erosionmap, int _hydroCycles, int size)
     {
+        dim = XMFLOAT2(size, size);
+
         std::random_device rd;  // Seed source
         std::mt19937 gen(rd()); // Mersenne Twister generator
         std::uniform_real_distribution<> dis(0.0, dim.x); // Uniform distribution between 0 and 
 
         erosionMap = erosionmap;
-
-        dim = XMFLOAT2(size, size);
 
         for (int i = 0; i < _hydroCycles; i++)
         {
@@ -94,7 +94,9 @@ public:
 
                 drop->volume *= (1.0F - dt * evapRate);
             }
+            delete drop;
         };
+        
         return erosionMap;
 
     };

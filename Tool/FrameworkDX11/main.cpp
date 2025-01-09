@@ -87,10 +87,13 @@ int                     h_cycles = 100;
 float                   n_Exponent = 1.0f;
 
 bool                    n_PerlinOn = true;
+float                   n_PerlinWeight = 1.0f;
 float                   n_PerlinFrequency = 0.1f;
 bool                    n_SimplexOn = false;
+float                   n_SimplexWeight = 1.0f;
 float                   n_SimplexFrequency = 0.1f;
 bool                    n_CellularOn = false;
+float                   n_CellularWeight = 1.0f;
 float                   n_CellularFrequency = 0.1f;
 int                     n_resolution = 256;
 
@@ -260,9 +263,9 @@ void GenerateNoise()
         for (int y = 0; y < n_resolution; y++) {
             float divideCount = 0;
             float tempColour = 0;
-            if (n_PerlinOn) { tempColour += n_Perlin.GetNoise((float)x, (float)y); divideCount += 1; }
-            if (n_SimplexOn) { tempColour += 0.5 * n_Simplex.GetNoise((float)x, (float)y); divideCount += 0.5; }
-            if (n_CellularOn) { tempColour += 0.25 * n_Cellular.GetNoise((float)x, (float)y); divideCount += 0.25; }
+            if (n_PerlinOn) { tempColour += n_PerlinWeight * n_Perlin.GetNoise((float)x, (float)y); divideCount += n_PerlinWeight; }
+            if (n_SimplexOn) { tempColour += n_SimplexWeight * n_Simplex.GetNoise((float)x, (float)y); divideCount += n_SimplexWeight; }
+            if (n_CellularOn) { tempColour += n_CellularWeight * n_Cellular.GetNoise((float)x, (float)y); divideCount += n_CellularWeight; }
             tempColour = tempColour / max(1, divideCount); // Avoid divide by zero
             int temp = (int)RatioValueConverter(-1.0f, 1.0f, 0.0f, 250.0f, tempColour);
             temp = max(0, min(255, temp)); // Clamp for safety
@@ -544,11 +547,11 @@ HRESULT InitDevice()
 HRESULT		InitRunTimeParameters()
 {
     n_Perlin.SetNoiseType(n_Perlin.NoiseType_Perlin);
-    n_Perlin.SetFrequency(n_PerlinFrequency);
+    n_Perlin.SetFrequency(n_PerlinFrequency/10);
     n_Simplex.SetNoiseType(n_Simplex.NoiseType_OpenSimplex2);
-    n_Simplex.SetFrequency(n_SimplexFrequency);
+    n_Simplex.SetFrequency(n_SimplexFrequency/10);
     n_Cellular.SetNoiseType(n_Cellular.NoiseType_Cellular);
-    n_Cellular.SetFrequency(n_CellularFrequency);
+    n_Cellular.SetFrequency(n_CellularFrequency/10);
     GenerateNoise();
 
     g_GameObject.setDetailRoughness(t_detail, t_roughness);
@@ -915,9 +918,9 @@ void GenerateTerrainWithNoise()
         for (int y = 0; y < n_resolution - 1; y++) {
             float divideCount = 0;
             float tempColour = 0;
-            if (n_PerlinOn) { tempColour += n_Perlin.GetNoise((float)x, (float)y); divideCount += 1; }
-            if (n_SimplexOn) { tempColour += n_Simplex.GetNoise((float)x, (float)y); divideCount += 0.5; }
-            if (n_CellularOn) { tempColour += n_Cellular.GetNoise((float)x, (float)y); divideCount += 0.25; }
+            if (n_PerlinOn) { tempColour += n_PerlinWeight * n_Perlin.GetNoise((float)x, (float)y); divideCount += n_PerlinWeight; }
+            if (n_SimplexOn) { tempColour += n_SimplexWeight * n_Simplex.GetNoise((float)x, (float)y); divideCount += n_SimplexWeight; }
+            if (n_CellularOn) { tempColour += n_CellularWeight * n_Cellular.GetNoise((float)x, (float)y); divideCount += n_CellularWeight; }
             tempColour = tempColour / max(1, divideCount); // Avoid divide by zero
             float temp = RatioValueConverter(-1.0f, 1.0f, 0.0f, 1.0f, tempColour);
             temp = pow(temp, n_Exponent);
@@ -958,7 +961,10 @@ void RenderDebugWindow(float deltaTime) {
     ImGui::SetNextWindowPos(ImVec2(10, 10 + (int)height));
     ImGui::Begin("Noise", 0, ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::Text("Noise Size");
-    ImGui::InputInt("Widght and Height Value", &n_resolution);
+    if (ImGui::InputInt("Widght and Height Value", &n_resolution))
+    {
+        GenerateTerrainWithNoise();
+    }
 
     if (ImGui::SliderFloat("Redistribution", &n_Exponent, 0.01f, 10.0f))
     {
@@ -976,11 +982,18 @@ void RenderDebugWindow(float deltaTime) {
     if (ImGui::Checkbox("Perlin Noise", &n_PerlinOn))
     {
         GenerateNoise();
+        GenerateTerrainWithNoise();
     };
     if(ImGui::Button("New Perlin Seed"))
     {
         n_Perlin.SetSeed(RandomSeed());
         GenerateNoise();
+        GenerateTerrainWithNoise();
+    }
+    if (ImGui::SliderFloat("Perlin Weighting", &n_PerlinWeight, 0.01f, 1.0f))
+    {
+        GenerateNoise();
+        GenerateTerrainWithNoise();
     }
     if (ImGui::SliderFloat("Perlin Frequency", &n_PerlinFrequency, 0.01f, 1.0f))
     {
@@ -992,11 +1005,18 @@ void RenderDebugWindow(float deltaTime) {
     if (ImGui::Checkbox("Simplex Noise", &n_SimplexOn)) 
     {
         GenerateNoise();
+        GenerateTerrainWithNoise();
     };
     if (ImGui::Button("New Simplex Seed"))
     {
         n_Simplex.SetSeed(RandomSeed());
         GenerateNoise();
+        GenerateTerrainWithNoise();
+    }
+    if (ImGui::SliderFloat("Simplex Weighting", &n_SimplexWeight, 0.01f, 1.0f))
+    {
+        GenerateNoise();
+        GenerateTerrainWithNoise();
     }
     if (ImGui::SliderFloat("Simplex Frequency", &n_SimplexFrequency, 0.01f, 1.0f))
     {
@@ -1008,11 +1028,18 @@ void RenderDebugWindow(float deltaTime) {
     if (ImGui::Checkbox("Cellular Noise", &n_CellularOn)) 
     {
         GenerateNoise();
+        GenerateTerrainWithNoise();
     };
     if (ImGui::Button("New Cellular Seed"))
     {
         n_Cellular.SetSeed(RandomSeed());
         GenerateNoise();
+        GenerateTerrainWithNoise();
+    }
+    if (ImGui::SliderFloat("Cellular Weighting", &n_CellularWeight, 0.01f, 1.0f))
+    {
+        GenerateNoise();
+        GenerateTerrainWithNoise();
     }
     if (ImGui::SliderFloat("Cellular Frequency", &n_CellularFrequency, 0.01f, 1.0f)) 
     {
