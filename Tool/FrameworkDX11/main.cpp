@@ -106,6 +106,10 @@ FastNoiseLite           n_Cellular = FastNoiseLite();
 ID3D11ShaderResourceView* n_texture = nullptr;
 
 char                   s_fileName[32] = { "MeshFileName" };
+
+float ScaleX;
+float ScaleY;
+
 //--------------------------------------------------------------------------------------
 // Entry point to the program. Initializes everything and goes into a message processing 
 // loop. Idle time is used to render the scene.
@@ -180,21 +184,27 @@ HRESULT InitWindow( HINSTANCE hInstance, int nCmdShow )
         return E_FAIL;
 
     // Create window
+    RECT desktop;
+    GetWindowRect(GetDesktopWindow(), &desktop);
+    int screenWidth = desktop.right;
+    int screenHeight = desktop.bottom;
     g_hInst = hInstance;
-    RECT rc = { 0, 0, 1920, 1080};
+    RECT rc = { 0, 0, screenWidth, screenHeight};
 
-	g_viewWidth = SCREEN_WIDTH;
-	g_viewHeight = SCREEN_HEIGHT;
+	g_viewWidth = screenWidth;
+	g_viewHeight = screenHeight;
 
     AdjustWindowRect( &rc, WS_OVERLAPPEDWINDOW, FALSE );
-    g_hWnd = CreateWindow( L"lWindowClass", L"DirectX 11",
-                           WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-                           CW_USEDEFAULT, CW_USEDEFAULT, rc.right - rc.left, rc.bottom - rc.top, nullptr, nullptr, hInstance,
-                           nullptr );
+    g_hWnd = CreateWindow(L"lWindowClass", L"DirectX 11",
+        WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT, CW_USEDEFAULT,
+        rc.right - rc.left, rc.bottom - rc.top,
+        nullptr, nullptr, hInstance, nullptr);
+
     if( !g_hWnd )
         return E_FAIL;
 
-    ShowWindow( g_hWnd, nCmdShow );
+    ShowWindow( g_hWnd, SW_MAXIMIZE );
 
     return S_OK;
 }
@@ -687,7 +697,14 @@ void CleanupDevice()
     if( g_pSwapChain ) g_pSwapChain->Release();
     if( g_pImmediateContext1 ) g_pImmediateContext1->Release();
     if( g_pImmediateContext ) g_pImmediateContext->Release();
+    if (n_pixels ) delete[] n_pixels;
+        
 
+    FastNoiseLite           n_Perlin = FastNoiseLite();
+    FastNoiseLite           n_Simplex = FastNoiseLite();
+    FastNoiseLite           n_Cellular = FastNoiseLite();
+
+    ID3D11ShaderResourceView* n_texture = nullptr;
 
     ID3D11Debug* debugDevice = nullptr;
     g_pd3dDevice->QueryInterface(__uuidof(ID3D11Debug), reinterpret_cast<void**>(&debugDevice));
@@ -696,7 +713,7 @@ void CleanupDevice()
     if (g_pd3dDevice) g_pd3dDevice->Release();
 
     // handy for finding dx memory leaks
-    debugDevice->ReportLiveDeviceObjects(D3D11_RLDO_DETAIL);
+    //debugDevice->ReportLiveDeviceObjects(D3D11_RLDO_DETAIL); // add back later for debugging
 
     if (debugDevice)
         debugDevice->Release();
@@ -798,7 +815,7 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
         // Calculate the delta from the window center
         POINT delta;
         delta.x = cursorPos.x - windowCenter.x;
-        delta.y = cursorPos.y - windowCenter.y;
+        delta.y = -(cursorPos.y - windowCenter.y);
 
         // Update the camera with the delta
         // (You may need to convert POINT to POINTS or use the deltas as is)
@@ -845,7 +862,7 @@ void setupLightForRender()
     light.QuadraticAttenuation = 0.01f;
 
     // set up the light
-    XMFLOAT4 LightPosition(-g_pCamera->GetPosition().x, -g_pCamera->GetPosition().y, -g_pCamera->GetPosition().z, 1);
+    static XMFLOAT4 LightPosition(-g_pCamera->GetPosition().x, -g_pCamera->GetPosition().y, -g_pCamera->GetPosition().z, 1);
     light.Position = LightPosition;
     //XMVECTOR LightDirection = XMVectorSet(-LightPosition.x, -LightPosition.y, -LightPosition.z, 0.0f);
     //LightDirection = XMVector3Normalize(LightDirection);
@@ -932,44 +949,75 @@ void GenerateTerrainWithNoise()
     g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
 }
 
+static void HelpMarker(const char* desc)
+{ 
+    ImGui::SameLine();
+    ImGui::TextDisabled("(?)");
+    if (ImGui::BeginItemTooltip())
+    {
+        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 35.0f);
+        ImGui::TextUnformatted(desc);
+        ImGui::PopTextWrapPos();
+        ImGui::EndTooltip();
+    }
+}
 
 void RenderDebugWindow(float deltaTime) {
     static float height = 0;
     static float width = 0;
-    ImGui::SetNextWindowPos(ImVec2(10, 10));
+
+    ImGui::SetNextWindowSizeConstraints(ImVec2(420 * ScaleX, 80 * ScaleY), ImVec2(420 * ScaleX, 1500 * ScaleY));
+    ImGui::SetNextWindowPos(ImVec2(10 * ScaleX, 10 * ScaleY));
     ImGui::Begin("Diamond Square Terrain", 0, ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::Text("");
-    ImGui::SliderInt("Detail(Size of the terrain)", &t_detail, 4, 10);
-    ImGui::SliderFloat("Roughness (0 - flat, 1 - very jagged)", &t_roughness, 0, 1);
+    ImGui::SetNextItemWidth(300 * ScaleX);
+    ImGui::SliderInt("Detail", &t_detail, 4, 11);
+    HelpMarker("The size of the terrain, it is the 2 to the power of the detail number + 1, so a detail of 9 is a terrain of 513x513 and 10 would be 1025x1025 ");
+    ImGui::SetNextItemWidth(300 * ScaleX);
+    ImGui::SliderFloat("Roughness", &t_roughness, 0, 1);
+    HelpMarker("0 is flat and 1 is very jagged");
     if (ImGui::Button("Generate"))
     {
         g_GameObject.setDetailRoughness(t_detail, t_roughness);
         g_GameObject.generateTerrain();
         g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
     }
-    ImGui::SliderInt("Cycles", &h_cycles, 100, 5000);
+    HelpMarker("");
 
+    width = ImGui::GetWindowWidth();
+    height = ImGui::GetWindowHeight();
+    ImGui::End();
+    ImGui::SetNextWindowSizeConstraints(ImVec2(420 * ScaleX, 80 * ScaleY), ImVec2(420 * ScaleX, 1500 * ScaleY));
+    ImGui::SetNextWindowPos(ImVec2(10 * ScaleX, 10 * ScaleY + (int)height));
+    ImGui::Begin("Hydraulic Erosion", 0, ImGuiWindowFlags_AlwaysAutoResize);
+    ImGui::SetNextItemWidth(300 * ScaleX);
+    ImGui::SliderInt("Cycles", &h_cycles, 100, 5000);
+    HelpMarker("");
     if (ImGui::Button("Hydraulic Errosion"))
     {
         g_GameObject.hydraulicErosion(h_cycles);
         g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
     }
-    height = ImGui::GetWindowHeight();
-    width = ImGui::GetWindowWidth();
+    height += ImGui::GetWindowHeight();
+    
     ImGui::End();
     
-    ImGui::SetNextWindowPos(ImVec2(10, 10 + (int)height));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(420*ScaleX, 300*ScaleY), ImVec2(420 * ScaleX, 1500 * ScaleY));
+    ImGui::SetNextWindowPos(ImVec2(10 * ScaleX, 10 * ScaleY + (int)height));
     ImGui::Begin("Noise", 0, ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::Text("Noise Size");
-    if (ImGui::InputInt("Widght and Height Value", &n_resolution))
+    ImGui::SetNextItemWidth(300 * ScaleX);
+    if (ImGui::SliderInt("Size", &n_resolution, 32, 2048))
     {
+        GenerateNoise();
         GenerateTerrainWithNoise();
     }
-
+    HelpMarker("");
+    ImGui::SetNextItemWidth(300 * ScaleX);
     if (ImGui::SliderFloat("Redistribution", &n_Exponent, 0.01f, 10.0f))
     {
         GenerateTerrainWithNoise();
     }
+    HelpMarker("");
     //if (ImGui::SliderFloat("Height", new float(), 0, 1000))
     //{
 
@@ -979,95 +1027,127 @@ void RenderDebugWindow(float deltaTime) {
 
     //}
     ImGui::Text("Noise Sliders");
-    if (ImGui::Checkbox("Perlin Noise", &n_PerlinOn))
+    ImGui::SetNextItemWidth(300 * ScaleX);
+    if (ImGui::Checkbox("Perlin Noise Enabled", &n_PerlinOn))
     {
         GenerateNoise();
         GenerateTerrainWithNoise();
     };
-    if(ImGui::Button("New Perlin Seed"))
-    {
-        n_Perlin.SetSeed(RandomSeed());
-        GenerateNoise();
-        GenerateTerrainWithNoise();
-    }
-    if (ImGui::SliderFloat("Perlin Weighting", &n_PerlinWeight, 0.01f, 1.0f))
-    {
-        GenerateNoise();
-        GenerateTerrainWithNoise();
-    }
-    if (ImGui::SliderFloat("Perlin Frequency", &n_PerlinFrequency, 0.01f, 1.0f))
-    {
-        n_Perlin.SetFrequency(n_PerlinFrequency/10);
-        GenerateNoise();
-        GenerateTerrainWithNoise();
+    HelpMarker("");
+    if (n_PerlinOn) {
+        if (ImGui::Button("New P Seed"))
+        {
+            n_Perlin.SetSeed(RandomSeed());
+            GenerateNoise();
+            GenerateTerrainWithNoise();
+        }
+        HelpMarker("");
+        ImGui::SetNextItemWidth(300 * ScaleX);
+        if (ImGui::SliderFloat("P Weighting", &n_PerlinWeight, 0.01f, 1.0f))
+        {
+            GenerateNoise();
+            GenerateTerrainWithNoise();
+        }
+        HelpMarker("");
+        ImGui::SetNextItemWidth(300 * ScaleX);
+
+        if (ImGui::SliderFloat("P Frequency", &n_PerlinFrequency, 0.01f, 1.0f))
+        {
+            n_Perlin.SetFrequency(n_PerlinFrequency / 10);
+            GenerateNoise();
+            GenerateTerrainWithNoise();
+        }
+        HelpMarker("");
     }
 
-    if (ImGui::Checkbox("Simplex Noise", &n_SimplexOn)) 
+    if (ImGui::Checkbox("Simplex Noise Enabled", &n_SimplexOn)) 
     {
         GenerateNoise();
         GenerateTerrainWithNoise();
     };
-    if (ImGui::Button("New Simplex Seed"))
-    {
-        n_Simplex.SetSeed(RandomSeed());
-        GenerateNoise();
-        GenerateTerrainWithNoise();
-    }
-    if (ImGui::SliderFloat("Simplex Weighting", &n_SimplexWeight, 0.01f, 1.0f))
-    {
-        GenerateNoise();
-        GenerateTerrainWithNoise();
-    }
-    if (ImGui::SliderFloat("Simplex Frequency", &n_SimplexFrequency, 0.01f, 1.0f))
-    {
-        n_Simplex.SetFrequency(n_SimplexFrequency/10);
-        GenerateNoise();
-        GenerateTerrainWithNoise();
+    HelpMarker("");
+    if (n_SimplexOn) {
+        if (ImGui::Button("New S Seed"))
+        {
+            n_Simplex.SetSeed(RandomSeed());
+            GenerateNoise();
+            GenerateTerrainWithNoise();
+        }
+        HelpMarker("");
+        ImGui::SetNextItemWidth(300 * ScaleX);
+
+        if (ImGui::SliderFloat("S Weighting", &n_SimplexWeight, 0.01f, 1.0f))
+        {
+            GenerateNoise();
+            GenerateTerrainWithNoise();
+        }
+        HelpMarker("");
+        ImGui::SetNextItemWidth(300 * ScaleX);
+
+        if (ImGui::SliderFloat("S Frequency", &n_SimplexFrequency, 0.01f, 1.0f))
+        {
+            n_Simplex.SetFrequency(n_SimplexFrequency / 10);
+            GenerateNoise();
+            GenerateTerrainWithNoise();
+        }
+        HelpMarker("");
     }
 
-    if (ImGui::Checkbox("Cellular Noise", &n_CellularOn)) 
+    if (ImGui::Checkbox("Cellular Noise Enabled", &n_CellularOn)) 
     {
         GenerateNoise();
         GenerateTerrainWithNoise();
     };
-    if (ImGui::Button("New Cellular Seed"))
-    {
-        n_Cellular.SetSeed(RandomSeed());
-        GenerateNoise();
-        GenerateTerrainWithNoise();
+    HelpMarker("");
+    if (n_CellularOn) {
+        if (ImGui::Button("New C Seed"))
+        {
+            n_Cellular.SetSeed(RandomSeed());
+            GenerateNoise();
+            GenerateTerrainWithNoise();
+        }
+        HelpMarker("");
+        ImGui::SetNextItemWidth(300 * ScaleX);
+
+        if (ImGui::SliderFloat("C Weighting", &n_CellularWeight, 0.01f, 1.0f))
+        {
+            GenerateNoise();
+            GenerateTerrainWithNoise();
+        }
+        HelpMarker("");
+        ImGui::SetNextItemWidth(300 * ScaleX);
+
+        if (ImGui::SliderFloat("C Frequency", &n_CellularFrequency, 0.01f, 1.0f))
+        {
+            n_Cellular.SetFrequency(n_CellularFrequency / 10);
+            GenerateNoise();
+            GenerateTerrainWithNoise();
+        };
+        HelpMarker("");
     }
-    if (ImGui::SliderFloat("Cellular Weighting", &n_CellularWeight, 0.01f, 1.0f))
-    {
-        GenerateNoise();
-        GenerateTerrainWithNoise();
-    }
-    if (ImGui::SliderFloat("Cellular Frequency", &n_CellularFrequency, 0.01f, 1.0f)) 
-    {
-        n_Cellular.SetFrequency(n_CellularFrequency/10);
-        GenerateNoise();
-        GenerateTerrainWithNoise();
-    };
-    if (n_texture == nullptr) {
-        OutputDebugStringA("n_texture is null before ImGui::Image\n");
-    }
-    if (ImGui::Button("Generate terrain with noise"))
-    {
-        GenerateTerrainWithNoise();
-    }
-    ImGui::Image((ImTextureID)(intptr_t)n_texture, ImVec2(384, 384));
+    //if (ImGui::Button("Generate terrain with noise"))
+    //{
+    //    GenerateTerrainWithNoise();
+    //}
     ImGui::End();
 
-    ImGui::SetNextWindowPos(ImVec2(10 + (int)width, 10));
+    ImGui::Begin("Noise Image", 0, ImGuiWindowFlags_AlwaysAutoResize);
+    HelpMarker("");
+    ImGui::Image((ImTextureID)(intptr_t)n_texture, ImVec2(350 * ScaleX, 350 * ScaleY));
+    ImGui::End();
+
+    ImGui::SetNextWindowPos(ImVec2(10 * ScaleX + (int)width, 10 * ScaleY));
     ImGui::Begin("File", 0, ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::InputText("FileName", s_fileName, 32);
     if (ImGui::Button("Save")) 
     {
         saveTerrain();
     }
+    HelpMarker("");
     height = ImGui::GetWindowHeight();
     ImGui::End();
 
-    ImGui::SetNextWindowPos(ImVec2(10 + (int)width, 10 + (int)height));
+    ImGui::SetNextWindowPos(ImVec2(10 * ScaleX + (int)width, 10 * ScaleY + (int)height));
     ImGui::Begin("Debug", 0, ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::Text("Camera Position: %.2f, %.2f, %.2f", g_pCamera->GetPosition().x, g_pCamera->GetPosition().y, g_pCamera->GetPosition().z);
     //if (ImGui::Button("Print Vertices"))
@@ -1088,20 +1168,39 @@ void RenderDebugWindow(float deltaTime) {
 //--------------------------------------------------------------------------------------
 void Render()
 {
-
-
     float t = calculateDeltaTime(); // capped at 60 fps
     if (t == 0.0f)
         return;
 
     // Start the Dear ImGui frame
 
+    RECT desktop;
+    GetWindowRect(GetDesktopWindow(), &desktop);
+    int screenWidth = desktop.right;
+    int screenHeight = desktop.bottom;
+    ScaleX = (float)screenWidth / 1920.0f;
+    ScaleY = (float)screenHeight / 1080.0f;
+
+
+
+
+    static bool fontLoaded = false;
+    if (!fontLoaded) {
+
+        ImGuiIO& io = ImGui::GetIO();
+        io.Fonts->AddFontFromFileTTF("calibri.ttf", 16.0f * ScaleX);
+        ImGui::GetIO().Fonts->Build();
+        ImGuiStyle& style = ImGui::GetStyle();
+        style.ScaleAllSizes(ScaleX);
+        fontLoaded = true;
+    }
+
     ImGui_ImplDX11_NewFrame();
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
 
     // YOU will want to modify this for your own debug, controls etc - comment it out to hide the window
-    
+
     RenderDebugWindow(t);
 
 

@@ -2,6 +2,7 @@
 
 
 #include <DirectXMath.h>
+#include <algorithm>
 #include <windows.h>
 #include <windowsx.h>
 #include "constants.h"
@@ -84,37 +85,26 @@ public:
     
     
         // Get the current look direction and up vector
-        XMVECTOR lookDirVec = XMLoadFloat3(&lookDir);
-        lookDirVec = XMVector3Normalize(lookDirVec);
-        XMVECTOR upVec = XMLoadFloat3(&up);
-        upVec = XMVector3Normalize(upVec);
-    
-        // Calculate the camera's right vector
-        XMVECTOR rightVec = XMVector3Cross(upVec, lookDirVec);
-        rightVec = XMVector3Normalize(rightVec);
-    
-    
-    
-            // Rotate the lookDir vector left or right based on the yaw
-            lookDirVec = XMVector3Transform(lookDirVec, XMMatrixRotationAxis(upVec, dx));
-            lookDirVec = XMVector3Normalize(lookDirVec);
-    
-            // Rotate the lookDir vector up or down based on the pitch
-            lookDirVec = XMVector3Transform(lookDirVec, XMMatrixRotationAxis(rightVec, dy));
-            lookDirVec = XMVector3Normalize(lookDirVec);
-    
-    
-        // Re-calculate the right vector after the yaw rotation
-        rightVec = XMVector3Cross(upVec, lookDirVec);
-        rightVec = XMVector3Normalize(rightVec);
-    
-        // Re-orthogonalize the up vector to be perpendicular to the look direction and right vector
-        upVec = XMVector3Cross(lookDirVec, rightVec);
-        upVec = XMVector3Normalize(upVec);
-    
-        // Store the updated vectors back to the class members
-        XMStoreFloat3(&lookDir, lookDirVec);
-        XMStoreFloat3(&up, upVec);
+        // Convert look direction to spherical coordinates
+        float yaw = atan2f(lookDir.x, lookDir.z);
+        float pitch = asinf(lookDir.y);
+
+        // Update yaw and pitch based on mouse movement
+        yaw += dx;
+        pitch =  std::clamp(pitch + dy, -XM_PIDIV2 + 0.01f, XM_PIDIV2 - 0.01f);
+
+        // Recalculate look direction using spherical coordinates
+        XMVECTOR newLookDir = XMVectorSet(
+            cosf(pitch) * sinf(yaw),
+            sinf(pitch),
+            cosf(pitch) * cosf(yaw),
+            0.0f
+        );
+
+        newLookDir = XMVector3Normalize(newLookDir);
+
+        // Update class variables
+        XMStoreFloat3(&lookDir, newLookDir);
     }
 
     void Update() { UpdateViewMatrix(); }

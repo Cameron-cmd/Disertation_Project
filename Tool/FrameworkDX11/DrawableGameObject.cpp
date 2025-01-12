@@ -127,8 +127,7 @@ HRESULT DrawableGameObject::initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceConte
 		{
 			SimpleVertex SV;
 			SV.Pos = XMFLOAT3(x, m_map[x][y], y);
-			float temp = RatioValueConverter(0, m_size, 0.0f, 0.6f, m_map[x][y]);
-			SV.Colour = XMFLOAT3(temp, temp, temp);
+			SV.Colour = XMFLOAT3(0.35f, 0.35f, 0.35f);
 			vertices[count] = SV;
 			count++;
 		}
@@ -151,9 +150,8 @@ HRESULT DrawableGameObject::initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceConte
 		XMFLOAT3 edgef1 = XMFLOAT3(vertices[ind1].Pos.x - vertices[ind2].Pos.x, vertices[ind1].Pos.y - vertices[ind2].Pos.y, vertices[ind1].Pos.z - vertices[ind2].Pos.z);
 		XMVECTOR edge1 = XMLoadFloat3(&edgef1);
 		XMFLOAT3 edgef2 = XMFLOAT3(vertices[ind1].Pos.x - vertices[ind2 + m_size - 1].Pos.x, vertices[ind1].Pos.y - vertices[ind2 + m_size - 1].Pos.y, vertices[ind1].Pos.z - vertices[ind2 + m_size - 1].Pos.z);
-		XMVECTOR edge2 = XMLoadFloat3(&edgef1);
-		XMVECTOR normal = edge1 * edge2;
-		normal = XMVector3Normalize(normal);
+		XMVECTOR edge2 = XMLoadFloat3(&edgef2);
+		XMVECTOR normal = XMVector3Cross(edge1, edge2);
 		XMFLOAT3 normFloat = XMFLOAT3(XMVectorGetX(normal), XMVectorGetY(normal), XMVectorGetZ(normal));
 
 		vertices[ind1].Normal = XMFLOAT3(normFloat.x + vertices[ind1].Normal.x, normFloat.y + vertices[ind1].Normal.y, normFloat.z + vertices[ind1].Normal.z);
@@ -171,12 +169,11 @@ HRESULT DrawableGameObject::initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceConte
 		edge1 = XMLoadFloat3(&edgef1);
 		edgef2 = XMFLOAT3(vertices[ind2].Pos.x - vertices[ind2 + m_size - 1].Pos.x, vertices[ind2].Pos.y - vertices[ind2 + m_size - 1].Pos.y, vertices[ind2].Pos.z - vertices[ind2 + m_size - 1].Pos.z);
 		edge2 = XMLoadFloat3(&edgef2);
-		normal = edge1 * edge2;
-		normal = XMVector3Normalize(normal);
+		normal = XMVector3Cross(edge1, edge2);
 		normFloat = XMFLOAT3(XMVectorGetX(normal), XMVectorGetY(normal), XMVectorGetZ(normal));
 
-		vertices[ind2].Normal = XMFLOAT3(normFloat.x + vertices[ind1].Normal.x, normFloat.y + vertices[ind1].Normal.y, normFloat.z + vertices[ind1].Normal.z);
-		vertices[ind2 + m_size].Normal = XMFLOAT3(normFloat.x + vertices[ind2].Normal.x, normFloat.y + vertices[ind2].Normal.y, normFloat.z + vertices[ind2].Normal.z);
+		vertices[ind2].Normal = XMFLOAT3(normFloat.x + vertices[ind2].Normal.x, normFloat.y + vertices[ind2].Normal.y, normFloat.z + vertices[ind2].Normal.z);
+		vertices[ind2 + m_size].Normal = XMFLOAT3(normFloat.x + vertices[ind2 + m_size].Normal.x, normFloat.y + vertices[ind2 + m_size].Normal.y, normFloat.z + vertices[ind2 + m_size].Normal.z);
 		vertices[ind2 + m_size - 1].Normal = XMFLOAT3(normFloat.x + vertices[ind2 + m_size - 1].Normal.x, normFloat.y + vertices[ind2 + m_size - 1].Normal.y, normFloat.z + vertices[ind2 + m_size - 1].Normal.z);
 
 		ind1 += 1;
