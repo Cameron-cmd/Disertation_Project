@@ -199,36 +199,36 @@ PS_INPUT VS( VS_INPUT input )
 
 float4 PS(PS_INPUT IN) : SV_TARGET
 {
-    float4 ambient = { 0.1, 0.0, 0.0, 1.0 };
-    float4 lightColor = { 1.0f, 1.0f, 1.0f, 1.0f };
+    //float4 ambient = { 0.1, 0.0, 0.0, 1.0 };
+    //float4 lightColor = { 1.0f, 1.0f, 1.0f, 1.0f };
 
-    float3 lightPosition = (-1000.0f, 1000.0f, -1000.0f);
-    float3 lightDirection = normalize(lightPosition - IN.Pos.xyz);
+    //float3 lightPosition = (-1000.0f, 1000.0f, -1000.0f);
+    //float3 lightDirection = normalize(lightPosition - IN.Pos.xyz);
 
-    float1 diffuse = saturate(dot(lightDirection, IN.Norm)) * lightColor;
+    //float1 diffuse = saturate(dot(lightDirection, IN.Norm)) * lightColor;
 
-    float4 output = float4(diffuse, diffuse, diffuse, 1);
+    //float4 output = float4(diffuse, diffuse, diffuse, 1);
 
-    //float4 solidColor = float4( 1.0f, 1.0f, 0.0f, 1.0f );
-    //output.color = solidColor;
-    return output;
-	//LightingResult lit = ComputeLighting(IN.worldPos, normalize(IN.Norm));
+    ////float4 solidColor = float4( 1.0f, 1.0f, 0.0f, 1.0f );
+    ////output.color = solidColor;
+    //return output;
+    LightingResult lit = ComputeLighting(IN.worldPos, normalize(IN.Norm));
 
- //   float4 texColor = { IN.Colour.r, IN.Colour.g, IN.Colour.b, 1 };
+    float4 texColor = { IN.Colour.r, IN.Colour.g, IN.Colour.b, 1 };
 
-	//float4 emissive = Material.Emissive;
-	//float4 ambient = Material.Ambient * GlobalAmbient;
-	//float4 diffuse = Material.Diffuse * lit.Diffuse;
-	//float4 specular = Material.Specular * lit.Specular;
+    float4 emissive = Material.Emissive;
+    float4 ambient = Material.Ambient * GlobalAmbient;
+    float4 diffuse = Material.Diffuse * lit.Diffuse;
+    float4 specular = Material.Specular * lit.Specular;
 
-	////if (Material.UseTexture)
-	////{
-	////	texColor = txDiffuse.Sample(samLinear, IN.Tex);
-	////}
+	//if (Material.UseTexture)
+	//{
+	//	texColor = txDiffuse.Sample(samLinear, IN.Tex);
+	//}
 
-	//float4 finalColor = (emissive + ambient + diffuse + specular) * texColor;
+    float4 finalColor = (emissive + ambient + diffuse + specular) * texColor;
 
-	//return finalColor;
+    return finalColor;
 }
 
 //--------------------------------------------------------------------------------------

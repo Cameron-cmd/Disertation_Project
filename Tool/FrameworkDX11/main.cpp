@@ -263,9 +263,8 @@ int RandomSeed()
 
 void GenerateNoise()
 {
-    if (n_pixels) {
-        delete[] n_pixels;
-    }
+    delete[] n_pixels;
+    n_pixels = nullptr;
     n_pixels = new uint32_t[n_resolution * n_resolution];
     memset(n_pixels, 0, sizeof(uint32_t) * n_resolution * n_resolution);
 
@@ -276,7 +275,7 @@ void GenerateNoise()
             if (n_PerlinOn) { tempColour += n_PerlinWeight * n_Perlin.GetNoise((float)x, (float)y); divideCount += n_PerlinWeight; }
             if (n_SimplexOn) { tempColour += n_SimplexWeight * n_Simplex.GetNoise((float)x, (float)y); divideCount += n_SimplexWeight; }
             if (n_CellularOn) { tempColour += n_CellularWeight * n_Cellular.GetNoise((float)x, (float)y); divideCount += n_CellularWeight; }
-            tempColour = tempColour / max(1, divideCount); // Avoid divide by zero
+            tempColour = tempColour / max(1.0f, divideCount); // Avoid divide by zero
             int temp = (int)RatioValueConverter(-1.0f, 1.0f, 0.0f, 250.0f, tempColour);
             temp = max(0, min(255, temp)); // Clamp for safety
             n_pixels[x + y * n_resolution] = (temp) | (temp << 8) | (temp << 16) | (255 << 24);
@@ -320,7 +319,8 @@ void GenerateNoise()
     }
 
     texture->Release();
-
+    delete[] n_pixels;
+    n_pixels = nullptr;
 }
 
 //--------------------------------------------------------------------------------------
@@ -947,6 +947,8 @@ void GenerateTerrainWithNoise()
     }
     g_GameObject.noiseGenerateTerrain(&map, n_resolution);
     g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
+    map.clear();
+    map.shrink_to_fit();
 }
 
 static void HelpMarker(const char* desc)
@@ -1043,7 +1045,7 @@ void RenderDebugWindow(float deltaTime) {
         }
         HelpMarker("");
         ImGui::SetNextItemWidth(300 * ScaleX);
-        if (ImGui::SliderFloat("P Weighting", &n_PerlinWeight, 0.01f, 1.0f))
+        if (ImGui::SliderFloat("P Intensity", &n_PerlinWeight, 0.01f, 1.0f))
         {
             GenerateNoise();
             GenerateTerrainWithNoise();
@@ -1051,7 +1053,7 @@ void RenderDebugWindow(float deltaTime) {
         HelpMarker("");
         ImGui::SetNextItemWidth(300 * ScaleX);
 
-        if (ImGui::SliderFloat("P Frequency", &n_PerlinFrequency, 0.01f, 1.0f))
+        if (ImGui::SliderFloat("P Scale", &n_PerlinFrequency, 0.01f, 1.0f))
         {
             n_Perlin.SetFrequency(n_PerlinFrequency / 10);
             GenerateNoise();
@@ -1076,7 +1078,7 @@ void RenderDebugWindow(float deltaTime) {
         HelpMarker("");
         ImGui::SetNextItemWidth(300 * ScaleX);
 
-        if (ImGui::SliderFloat("S Weighting", &n_SimplexWeight, 0.01f, 1.0f))
+        if (ImGui::SliderFloat("S Intensity", &n_SimplexWeight, 0.01f, 1.0f))
         {
             GenerateNoise();
             GenerateTerrainWithNoise();
@@ -1084,7 +1086,7 @@ void RenderDebugWindow(float deltaTime) {
         HelpMarker("");
         ImGui::SetNextItemWidth(300 * ScaleX);
 
-        if (ImGui::SliderFloat("S Frequency", &n_SimplexFrequency, 0.01f, 1.0f))
+        if (ImGui::SliderFloat("S Scale", &n_SimplexFrequency, 0.01f, 1.0f))
         {
             n_Simplex.SetFrequency(n_SimplexFrequency / 10);
             GenerateNoise();
@@ -1109,7 +1111,7 @@ void RenderDebugWindow(float deltaTime) {
         HelpMarker("");
         ImGui::SetNextItemWidth(300 * ScaleX);
 
-        if (ImGui::SliderFloat("C Weighting", &n_CellularWeight, 0.01f, 1.0f))
+        if (ImGui::SliderFloat("C Intensity", &n_CellularWeight, 0.01f, 1.0f))
         {
             GenerateNoise();
             GenerateTerrainWithNoise();
@@ -1117,7 +1119,7 @@ void RenderDebugWindow(float deltaTime) {
         HelpMarker("");
         ImGui::SetNextItemWidth(300 * ScaleX);
 
-        if (ImGui::SliderFloat("C Frequency", &n_CellularFrequency, 0.01f, 1.0f))
+        if (ImGui::SliderFloat("C Scale", &n_CellularFrequency, 0.01f, 1.0f))
         {
             n_Cellular.SetFrequency(n_CellularFrequency / 10);
             GenerateNoise();

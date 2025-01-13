@@ -44,6 +44,9 @@ void DrawableGameObject::cleanup()
 	if (m_pMaterialConstantBuffer)
 		m_pMaterialConstantBuffer->Release();
 	m_pMaterialConstantBuffer = nullptr;
+
+	if (m_indicesArray) { delete[] m_indicesArray;  m_indicesArray = nullptr; }
+	if (m_verticesArray) { delete[] m_verticesArray;  m_verticesArray = nullptr; }
 }
 
 void DrawableGameObject::setDetailRoughness(int detail, float roughness) {
@@ -72,6 +75,7 @@ void DrawableGameObject::hydraulicErosion(int cycles)
 
 void DrawableGameObject::noiseGenerateTerrain(std::vector<std::vector<float>>* pMap, int size)
 {
+	m_map.clear();
 	m_map = *pMap;
 	m_size = size - 1;
 	m_max = size - 2;
@@ -112,13 +116,11 @@ HRESULT DrawableGameObject::initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceConte
 
 	int vertexCount = 0;
 	int indexCount = 0;
-	SimpleVertex* vertices{};
-	DWORD* indices{};
 
 	vertexCount = m_size * m_size;
 	indexCount = (((m_size-1) * 2) * (m_size - 1)) * 3;
-	vertices = new SimpleVertex[vertexCount];
-	indices = new DWORD[indexCount];
+	m_verticesArray = new SimpleVertex[vertexCount];
+	m_indicesArray = new DWORD[indexCount];
 	m_IndexCount = indexCount;
 	int count = 0;
 	for (int x = 0; x < m_size; x++)
@@ -127,8 +129,8 @@ HRESULT DrawableGameObject::initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceConte
 		{
 			SimpleVertex SV;
 			SV.Pos = XMFLOAT3(x, m_map[x][y], y);
-			SV.Colour = XMFLOAT3(0.35f, 0.35f, 0.35f);
-			vertices[count] = SV;
+			SV.Colour = XMFLOAT3(0.20f, 0.20f, 0.20f);
+			m_verticesArray[count] = SV;
 			count++;
 		}
 	}
@@ -141,40 +143,40 @@ HRESULT DrawableGameObject::initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceConte
 	{
 		//OutputDebugStringA((to_string(count) + "\n").c_str());
 		if (ind1 % m_max == remainder && ind1 != 0) { ind1++; ind2++; remainder++;}
-		indices[count] = (DWORD)ind1;
+		m_indicesArray[count] = (DWORD)ind1;
 		count++;
-		indices[count] = (DWORD)ind2;
+		m_indicesArray[count] = (DWORD)ind2;
 		count++;
-		indices[count] = (DWORD)(ind2 + m_size -1);
+		m_indicesArray[count] = (DWORD)(ind2 + m_size -1);
 		count++;
-		XMFLOAT3 edgef1 = XMFLOAT3(vertices[ind1].Pos.x - vertices[ind2].Pos.x, vertices[ind1].Pos.y - vertices[ind2].Pos.y, vertices[ind1].Pos.z - vertices[ind2].Pos.z);
+		XMFLOAT3 edgef1 = XMFLOAT3(m_verticesArray[ind1].Pos.x - m_verticesArray[ind2].Pos.x, m_verticesArray[ind1].Pos.y - m_verticesArray[ind2].Pos.y, m_verticesArray[ind1].Pos.z - m_verticesArray[ind2].Pos.z);
 		XMVECTOR edge1 = XMLoadFloat3(&edgef1);
-		XMFLOAT3 edgef2 = XMFLOAT3(vertices[ind1].Pos.x - vertices[ind2 + m_size - 1].Pos.x, vertices[ind1].Pos.y - vertices[ind2 + m_size - 1].Pos.y, vertices[ind1].Pos.z - vertices[ind2 + m_size - 1].Pos.z);
+		XMFLOAT3 edgef2 = XMFLOAT3(m_verticesArray[ind1].Pos.x - m_verticesArray[ind2 + m_size - 1].Pos.x, m_verticesArray[ind1].Pos.y - m_verticesArray[ind2 + m_size - 1].Pos.y, m_verticesArray[ind1].Pos.z - m_verticesArray[ind2 + m_size - 1].Pos.z);
 		XMVECTOR edge2 = XMLoadFloat3(&edgef2);
 		XMVECTOR normal = XMVector3Cross(edge1, edge2);
 		XMFLOAT3 normFloat = XMFLOAT3(XMVectorGetX(normal), XMVectorGetY(normal), XMVectorGetZ(normal));
 
-		vertices[ind1].Normal = XMFLOAT3(normFloat.x + vertices[ind1].Normal.x, normFloat.y + vertices[ind1].Normal.y, normFloat.z + vertices[ind1].Normal.z);
-		vertices[ind2].Normal = XMFLOAT3(normFloat.x + vertices[ind2].Normal.x, normFloat.y + vertices[ind2].Normal.y, normFloat.z + vertices[ind2].Normal.z);
-		vertices[ind2 + m_size - 1].Normal = XMFLOAT3(normFloat.x + vertices[ind2 + m_size - 1].Normal.x, normFloat.y + vertices[ind2 + m_size - 1].Normal.y, normFloat.z + vertices[ind2 + m_size - 1].Normal.z);
+		m_verticesArray[ind1].Normal = XMFLOAT3(normFloat.x + m_verticesArray[ind1].Normal.x, normFloat.y + m_verticesArray[ind1].Normal.y, normFloat.z + m_verticesArray[ind1].Normal.z);
+		m_verticesArray[ind2].Normal = XMFLOAT3(normFloat.x + m_verticesArray[ind2].Normal.x, normFloat.y + m_verticesArray[ind2].Normal.y, normFloat.z + m_verticesArray[ind2].Normal.z);
+		m_verticesArray[ind2 + m_size - 1].Normal = XMFLOAT3(normFloat.x + m_verticesArray[ind2 + m_size - 1].Normal.x, normFloat.y + m_verticesArray[ind2 + m_size - 1].Normal.y, normFloat.z + m_verticesArray[ind2 + m_size - 1].Normal.z);
 
-		indices[count] = (DWORD)(ind2);
+		m_indicesArray[count] = (DWORD)(ind2);
 		count++;
-		indices[count] = (DWORD)(ind2 + m_size);
+		m_indicesArray[count] = (DWORD)(ind2 + m_size);
 		count++;
-		indices[count] = (DWORD)(ind2 + m_size - 1);
+		m_indicesArray[count] = (DWORD)(ind2 + m_size - 1);
 		count++;
 
-		edgef1 = XMFLOAT3(vertices[ind2].Pos.x - vertices[ind2 + m_size].Pos.x, vertices[ind2].Pos.y - vertices[ind2 + m_size].Pos.y, vertices[ind2].Pos.z - vertices[ind2 + m_size].Pos.z);
+		edgef1 = XMFLOAT3(m_verticesArray[ind2].Pos.x - m_verticesArray[ind2 + m_size].Pos.x, m_verticesArray[ind2].Pos.y - m_verticesArray[ind2 + m_size].Pos.y, m_verticesArray[ind2].Pos.z - m_verticesArray[ind2 + m_size].Pos.z);
 		edge1 = XMLoadFloat3(&edgef1);
-		edgef2 = XMFLOAT3(vertices[ind2].Pos.x - vertices[ind2 + m_size - 1].Pos.x, vertices[ind2].Pos.y - vertices[ind2 + m_size - 1].Pos.y, vertices[ind2].Pos.z - vertices[ind2 + m_size - 1].Pos.z);
+		edgef2 = XMFLOAT3(m_verticesArray[ind2].Pos.x - m_verticesArray[ind2 + m_size - 1].Pos.x, m_verticesArray[ind2].Pos.y - m_verticesArray[ind2 + m_size - 1].Pos.y, m_verticesArray[ind2].Pos.z - m_verticesArray[ind2 + m_size - 1].Pos.z);
 		edge2 = XMLoadFloat3(&edgef2);
 		normal = XMVector3Cross(edge1, edge2);
 		normFloat = XMFLOAT3(XMVectorGetX(normal), XMVectorGetY(normal), XMVectorGetZ(normal));
 
-		vertices[ind2].Normal = XMFLOAT3(normFloat.x + vertices[ind2].Normal.x, normFloat.y + vertices[ind2].Normal.y, normFloat.z + vertices[ind2].Normal.z);
-		vertices[ind2 + m_size].Normal = XMFLOAT3(normFloat.x + vertices[ind2 + m_size].Normal.x, normFloat.y + vertices[ind2 + m_size].Normal.y, normFloat.z + vertices[ind2 + m_size].Normal.z);
-		vertices[ind2 + m_size - 1].Normal = XMFLOAT3(normFloat.x + vertices[ind2 + m_size - 1].Normal.x, normFloat.y + vertices[ind2 + m_size - 1].Normal.y, normFloat.z + vertices[ind2 + m_size - 1].Normal.z);
+		m_verticesArray[ind2].Normal = XMFLOAT3(normFloat.x + m_verticesArray[ind2].Normal.x, normFloat.y + m_verticesArray[ind2].Normal.y, normFloat.z + m_verticesArray[ind2].Normal.z);
+		m_verticesArray[ind2 + m_size].Normal = XMFLOAT3(normFloat.x + m_verticesArray[ind2 + m_size].Normal.x, normFloat.y + m_verticesArray[ind2 + m_size].Normal.y, normFloat.z + m_verticesArray[ind2 + m_size].Normal.z);
+		m_verticesArray[ind2 + m_size - 1].Normal = XMFLOAT3(normFloat.x + m_verticesArray[ind2 + m_size - 1].Normal.x, normFloat.y + m_verticesArray[ind2 + m_size - 1].Normal.y, normFloat.z + m_verticesArray[ind2 + m_size - 1].Normal.z);
 
 		ind1 += 1;
 		ind2 += 1;
@@ -184,14 +186,11 @@ HRESULT DrawableGameObject::initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceConte
 	{
 		for (int y = 0; y < m_size; y++)
 		{
-			XMVECTOR temp = XMVector3Normalize(XMVECTOR(XMLoadFloat3(&vertices[count].Normal)));
-			vertices[count].Normal = XMFLOAT3(XMVectorGetX(temp*-1), XMVectorGetY(temp*-1), XMVectorGetZ(temp*-1));
+			XMVECTOR temp = XMVector3Normalize(XMVECTOR(XMLoadFloat3(&m_verticesArray[count].Normal)));
+			m_verticesArray[count].Normal = XMFLOAT3(XMVectorGetX(temp*-1), XMVectorGetY(temp*-1), XMVectorGetZ(temp*-1));
 			count++;
 		}
 	}
-
-	m_indicesArray = indices;
-	m_verticesArray = vertices;
 	//ifstream myfile;
 	//myfile.open("Resources//City1 Block 1.obj", ios::in);
 	//if (!myfile.fail())
@@ -204,7 +203,7 @@ HRESULT DrawableGameObject::initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceConte
 	//	line.clear();
 	//	m_IndexCount = indexCount;
 	//	vertices = new SimpleVertex[vertexCount];
-	//	indices = new WORD[indexCount];
+	//	m_indicesArray = new WORD[indexCount];
 	//	int vertIndex = 0;
 	//	int indIndex = 0;
 	//	float indcount = 0;
@@ -228,14 +227,14 @@ HRESULT DrawableGameObject::initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceConte
 	//		if (!line.empty() && line[0] == 'f') {
 	//			XMINT3 face;
 	//			sscanf(line.c_str(), "f %i %i %i", &face.x, &face.y, &face.z);
-	//			indices[indIndex] = face.x - 1;
-	//			//OutputDebugStringA((to_string(indices[indIndex])+" ").c_str());
+	//			m_indicesArray[indIndex] = face.x - 1;
+	//			//OutputDebugStringA((to_string(m_indicesArray[indIndex])+" ").c_str());
 	//			indIndex++;
-	//			indices[indIndex] = face.y - 1;
-	//			//OutputDebugStringA((to_string(indices[indIndex]) + " ").c_str());
+	//			m_indicesArray[indIndex] = face.y - 1;
+	//			//OutputDebugStringA((to_string(m_indicesArray[indIndex]) + " ").c_str());
 	//			indIndex++;
-	//			indices[indIndex] = face.z - 1;
-	//			//OutputDebugStringA((to_string(indices[indIndex]) + "\n").c_str());
+	//			m_indicesArray[indIndex] = face.z - 1;
+	//			//OutputDebugStringA((to_string(m_indicesArray[indIndex]) + "\n").c_str());
 	//			indIndex++;
 
 	//		}
@@ -251,7 +250,7 @@ HRESULT DrawableGameObject::initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceConte
 	bd.CPUAccessFlags = 0;
 
 	D3D11_SUBRESOURCE_DATA InitData = {};
-	InitData.pSysMem = vertices;
+	InitData.pSysMem = m_verticesArray;
 	HRESULT hr = pd3dDevice->CreateBuffer(&bd, &InitData, &m_pVertexBuffer);
 	if (FAILED(hr))
 		return hr;
@@ -266,7 +265,7 @@ HRESULT DrawableGameObject::initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceConte
 	bd.ByteWidth = sizeof(DWORD) * indexCount;        // 36 vertices needed for 12 triangles in a triangle list
 	bd.BindFlags = D3D11_BIND_INDEX_BUFFER;
 	bd.CPUAccessFlags = 0;
-	InitData.pSysMem = indices;
+	InitData.pSysMem = m_indicesArray;
 	hr = pd3dDevice->CreateBuffer(&bd, &InitData, &m_pIndexBuffer);
 	if (FAILED(hr))
 		return hr;
@@ -301,7 +300,6 @@ HRESULT DrawableGameObject::initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceConte
 	hr = pd3dDevice->CreateBuffer(&bd, nullptr, &m_pMaterialConstantBuffer);
 	if (FAILED(hr))
 		return hr;
-
 	return hr;
 }
 
