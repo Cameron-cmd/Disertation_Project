@@ -57,6 +57,9 @@ public:
 	DWORD*								GetIndices() { return m_indicesArray; }
 	INT									GetSize() { return m_size; }
 	INT									GetIndexCount() { return m_IndexCount; }
+	float GetHeight(int x, int y) { return m_map[x][y]; }
+	void SetHeight(int x, int y, float z) { m_map[x][y] = z; }
+
 private:
 	
 	XMFLOAT4X4							m_World;

@@ -110,6 +110,15 @@ char                   s_fileName[32] = { "MeshFileName" };
 float ScaleX;
 float ScaleY;
 
+bool normalDraw = true;
+bool wireDraw = true;
+bool wireframeEnabled = false;
+
+ID3D11RasterizerState* rasterizerState;
+
+float height = 0;
+float width = 0;
+
 //--------------------------------------------------------------------------------------
 // Entry point to the program. Initializes everything and goes into a message processing 
 // loop. Idle time is used to render the scene.
@@ -789,6 +798,41 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
     case WM_RBUTTONUP:
         mouseDown = false;
         break;
+    case WM_LBUTTONDOWN:
+    {
+        XMFLOAT3 cameraPosition = g_pCamera->GetPosition();
+        XMVECTOR rayOrigin = XMLoadFloat3(&cameraPosition);
+        POINTS mousePos = MAKEPOINTS(lParam);
+        XMFLOAT2 temp = XMFLOAT2(mousePos.x, mousePos.y);
+        XMVECTOR cursorPos = XMLoadFloat2(&temp);
+        RECT rect;
+        GetClientRect(hWnd, &rect);
+        XMMATRIX mGO = XMLoadFloat4x4(g_GameObject.getTransform());
+        XMMATRIX World = XMMatrixTranspose(mGO);
+        XMVECTOR rayDirection = XMVector3Normalize(XMVector3Unproject(cursorPos, 0, 0, (rect.right - rect.left), (rect.bottom - rect.top), 0.0f, 1.0f, g_Projection, g_pCamera->GetViewMatrix(), World) - rayOrigin);
+
+        float stepSize = 0.5f;
+        float currentDistance = 0.0f;
+        int maxDistance = 5000;
+        XMVECTOR Position = rayOrigin;
+        while (currentDistance < maxDistance)
+        {
+            float x = XMVectorGetX(Position);
+            float z = XMVectorGetZ(Position);
+            float size = g_GameObject.GetSize();
+            if (x <= size && x >= 0 && z <= size && z >= 0) {
+                float height = g_GameObject.GetHeight((int)x, int(z));
+                if (abs(height - XMVectorGetY(Position) <= 1)) {
+                    g_GameObject.SetHeight((int)x, (int)z, height - 5);
+                    g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
+                    break;
+                }
+            }
+            Position += rayDirection * stepSize;
+            currentDistance += stepSize;
+        }
+        break;
+    }
     case WM_MOUSEMOVE:
     {
         if (!mouseDown)
@@ -963,11 +1007,7 @@ static void HelpMarker(const char* desc)
         ImGui::EndTooltip();
     }
 }
-
-void RenderDebugWindow(float deltaTime) {
-    static float height = 0;
-    static float width = 0;
-
+void DSGUI() {
     ImGui::SetNextWindowSizeConstraints(ImVec2(420 * ScaleX, 80 * ScaleY), ImVec2(420 * ScaleX, 1500 * ScaleY));
     ImGui::SetNextWindowPos(ImVec2(10 * ScaleX, 10 * ScaleY));
     ImGui::Begin("Diamond Square Terrain", 0, ImGuiWindowFlags_AlwaysAutoResize);
@@ -988,6 +1028,8 @@ void RenderDebugWindow(float deltaTime) {
     width = ImGui::GetWindowWidth();
     height = ImGui::GetWindowHeight();
     ImGui::End();
+}
+void HydroErosionGUI() {
     ImGui::SetNextWindowSizeConstraints(ImVec2(420 * ScaleX, 80 * ScaleY), ImVec2(420 * ScaleX, 1500 * ScaleY));
     ImGui::SetNextWindowPos(ImVec2(10 * ScaleX, 10 * ScaleY + (int)height));
     ImGui::Begin("Hydraulic Erosion", 0, ImGuiWindowFlags_AlwaysAutoResize);
@@ -1000,10 +1042,11 @@ void RenderDebugWindow(float deltaTime) {
         g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
     }
     height += ImGui::GetWindowHeight();
-    
+
     ImGui::End();
-    
-    ImGui::SetNextWindowSizeConstraints(ImVec2(420*ScaleX, 300*ScaleY), ImVec2(420 * ScaleX, 1500 * ScaleY));
+}
+void NoiseGUI() {
+    ImGui::SetNextWindowSizeConstraints(ImVec2(420 * ScaleX, 300 * ScaleY), ImVec2(420 * ScaleX, 1500 * ScaleY));
     ImGui::SetNextWindowPos(ImVec2(10 * ScaleX, 10 * ScaleY + (int)height));
     ImGui::Begin("Noise", 0, ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::Text("Noise Size");
@@ -1062,7 +1105,7 @@ void RenderDebugWindow(float deltaTime) {
         HelpMarker("");
     }
 
-    if (ImGui::Checkbox("Simplex Noise Enabled", &n_SimplexOn)) 
+    if (ImGui::Checkbox("Simplex Noise Enabled", &n_SimplexOn))
     {
         GenerateNoise();
         GenerateTerrainWithNoise();
@@ -1095,7 +1138,7 @@ void RenderDebugWindow(float deltaTime) {
         HelpMarker("");
     }
 
-    if (ImGui::Checkbox("Cellular Noise Enabled", &n_CellularOn)) 
+    if (ImGui::Checkbox("Cellular Noise Enabled", &n_CellularOn))
     {
         GenerateNoise();
         GenerateTerrainWithNoise();
@@ -1132,26 +1175,30 @@ void RenderDebugWindow(float deltaTime) {
     //    GenerateTerrainWithNoise();
     //}
     ImGui::End();
-
+}
+void NoiseImage() {
     ImGui::Begin("Noise Image", 0, ImGuiWindowFlags_AlwaysAutoResize);
     HelpMarker("");
     ImGui::Image((ImTextureID)(intptr_t)n_texture, ImVec2(350 * ScaleX, 350 * ScaleY));
     ImGui::End();
-
+}
+void File() {
     ImGui::SetNextWindowPos(ImVec2(10 * ScaleX + (int)width, 10 * ScaleY));
     ImGui::Begin("File", 0, ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::InputText("FileName", s_fileName, 32);
-    if (ImGui::Button("Save")) 
+    if (ImGui::Button("Export"))
     {
         saveTerrain();
     }
     HelpMarker("");
     height = ImGui::GetWindowHeight();
     ImGui::End();
-
+}
+void Debug() {
     ImGui::SetNextWindowPos(ImVec2(10 * ScaleX + (int)width, 10 * ScaleY + (int)height));
     ImGui::Begin("Debug", 0, ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::Text("Camera Position: %.2f, %.2f, %.2f", g_pCamera->GetPosition().x, g_pCamera->GetPosition().y, g_pCamera->GetPosition().z);
+    ImGui::Checkbox("wireFrame", &wireframeEnabled);
     //if (ImGui::Button("Print Vertices"))
     //{
     //   g_GameObject.printVertices();
@@ -1161,8 +1208,16 @@ void RenderDebugWindow(float deltaTime) {
     //    g_GameObject.printIndicies();
     //}
     ImGui::End();
+}
 
 
+void RenderDebugWindow(float deltaTime) {
+    DSGUI();
+    HydroErosionGUI();
+    NoiseGUI();
+    NoiseImage();
+    File();
+    Debug();
 }
 
 //--------------------------------------------------------------------------------------
@@ -1173,6 +1228,39 @@ void Render()
     float t = calculateDeltaTime(); // capped at 60 fps
     if (t == 0.0f)
         return;
+
+
+    if (normalDraw && !wireframeEnabled) {
+        D3D11_RASTERIZER_DESC rasterizerDesc = {};
+        rasterizerDesc.FillMode = D3D11_FILL_SOLID;
+        rasterizerDesc.CullMode = D3D11_CULL_BACK;
+        rasterizerDesc.FrontCounterClockwise = FALSE;
+        rasterizerDesc.DepthClipEnable = TRUE;
+
+        g_pd3dDevice->CreateRasterizerState(&rasterizerDesc, &rasterizerState);
+        g_pImmediateContext->RSSetState(rasterizerState);
+
+        normalDraw = false;
+        wireDraw = true;
+
+
+    }
+
+    if (wireDraw && wireframeEnabled) {
+        D3D11_RASTERIZER_DESC rasterizerDesc = {};
+        rasterizerDesc.FillMode = D3D11_FILL_WIREFRAME;
+        rasterizerDesc.CullMode = D3D11_CULL_NONE;
+        rasterizerDesc.FrontCounterClockwise = FALSE;
+        rasterizerDesc.DepthClipEnable = TRUE;
+        rasterizerDesc.AntialiasedLineEnable = TRUE;
+        rasterizerDesc.MultisampleEnable = TRUE;
+
+        g_pd3dDevice->CreateRasterizerState(&rasterizerDesc, &rasterizerState);
+        g_pImmediateContext->RSSetState(rasterizerState);
+
+        wireDraw = false;
+        normalDraw = true;
+    }
 
     // Start the Dear ImGui frame
 
