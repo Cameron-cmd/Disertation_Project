@@ -141,6 +141,8 @@ float movement = 50.0f;
 bool b_FlatBool = false;
 int b_FlatSize = 2;
 float b_MaxFlatDifference = 2.0f;
+
+float c_sensitivity = 1.0f;
 //--------------------------------------------------------------------------------------
 // Entry point to the program. Initializes everything and goes into a message processing 
 // loop. Idle time is used to render the scene.
@@ -292,86 +294,127 @@ int RandomSeed()
     return dis(rng);
 }
 
-float GenerateNoiseThread(FastNoiseLite* noise, int* octaves, int* x, int* y)
+float GenerateNoiseValue(FastNoiseLite* noise, int octaves, int x, int y)
 {
     float colour = 0;
     float weight = 1.0f;
-    float scale = 1.0f;
+    int scale = 1.0f;
     float totalDivide = 0;
-    for (int i = 0; i < *octaves; i++) {
-        colour += weight * noise->GetNoise((float)*x * scale , (float)*y * scale);
+    for (int i = 0; i < octaves; i++) {
         totalDivide += weight;
+        weight *= 0.5f;
+    }
+    weight = 1.0f;
+    for (int i = 0; i < octaves; i++) {
+        colour += weight * noise->GetNoise((float)x * (float)scale , (float)y * (float)scale);
         weight = weight * 0.5;
         scale = scale * 2;
     }
     return colour / totalDivide;
 }
 
-void GenerateNoise()
+void ProcessChunk(int startX, int endX, std::vector<std::vector<float>>* map, bool Image, bool Terrain, float normalizationFactor)
 {
-    delete[] n_pixels;
-    n_pixels = nullptr;
-    n_pixels = new uint32_t[n_resolution * n_resolution];
-    memset(n_pixels, 0, sizeof(uint32_t) * n_resolution * n_resolution);
-
     for (int x = 0; x < n_resolution; x++) {
         for (int y = 0; y < n_resolution; y++) {
             float colour = 0;
-            if (n_PerlinOn) { colour += GenerateNoiseThread(&n_Perlin, &n_PerlinOctaves, &x, &y) * n_PerlinWeight; }
-            if (n_SimplexOn) { colour += GenerateNoiseThread(&n_Simplex, &n_SimplexOctaves, &x, &y) * n_SimplexWeight; }
-            if (n_CellularOn) { colour += GenerateNoiseThread(&n_Cellular, &n_CellularOctaves, &x, &y) * n_CellularWeight; }
-            
-            float maxWeightSum = n_PerlinOn * n_PerlinWeight +
-                n_SimplexOn * n_SimplexWeight +
-                n_CellularOn * n_CellularWeight;
+            if (n_PerlinOn) { colour += GenerateNoiseValue(&n_Perlin, n_PerlinOctaves, x, y) * n_PerlinWeight; }
+            if (n_SimplexOn) { colour += GenerateNoiseValue(&n_Simplex, n_SimplexOctaves, x, y) * n_SimplexWeight; }
+            if (n_CellularOn) { colour += GenerateNoiseValue(&n_Cellular, n_CellularOctaves, x, y) * n_CellularWeight; }
 
-            float normalizedColour = (colour / maxWeightSum) * 0.5f + 0.5f;  // Normalize to [0, 1]
-            int temp = (int)(normalizedColour * 255);
-
-            temp = max(0 , min(255, temp)); // Clamp for safety
-            n_pixels[x + y * n_resolution] = (temp) | (temp << 8) | (temp << 16) | (255 << 24);
+            float normalizedColour = colour * normalizationFactor + 0.5f;  // Normalize to [0, 1]
+            if (Terrain) {
+                float mapVal = pow(normalizedColour, n_Exponent);
+                mapVal = (mapVal * n_height);
+                mapVal = max(n_floor, min(n_height, mapVal));
+                (*map)[x][y] = mapVal;
+            }
+            if (Image) {
+                int texture = (int)(normalizedColour * 255);
+                texture = max(0, min(255, texture)); // Clamp for safety
+                n_pixels[x + y * n_resolution] = (texture) | (texture << 8) | (texture << 16) | (255 << 24);
+            }
         }
     }
-    if (n_texture) {
-        n_texture->Release();
-        n_texture = nullptr;
+}
+
+void GenerateNoiseImageAndTerrain(bool Image, bool Terrain)
+{
+    n_pixels = new uint32_t[n_resolution * n_resolution];
+    memset(n_pixels, 0, sizeof(uint32_t) * n_resolution * n_resolution);
+    std::vector<std::vector<float>> map(n_resolution, std::vector<float>(n_resolution));
+
+    int numThreads = std::thread::hardware_concurrency();
+    int chunkSize = n_resolution / numThreads;
+
+    float maxWeightSum = (n_PerlinOn * n_PerlinWeight) +
+        (n_SimplexOn * n_SimplexWeight) +
+        (n_CellularOn * n_CellularWeight);
+
+    float normalizationFactor = 0.5f / maxWeightSum;
+
+    std::vector<std::thread> threads;
+
+    for (int i = 0; i < numThreads; ++i) {
+        int startX = i * chunkSize;
+        int endX = (i == numThreads - 1) ? n_resolution : (startX + chunkSize); 
+
+        threads.push_back(thread(ProcessChunk, startX, endX, &map, Image, Terrain, normalizationFactor));
     }
 
-    D3D11_SUBRESOURCE_DATA subrecData = {};
-    subrecData.pSysMem = n_pixels;
-    subrecData.SysMemPitch = n_resolution * sizeof(uint32_t);
+    for (auto& thread : threads) {
+        thread.join();
+    }
+    threads.clear();
+    threads.shrink_to_fit();
 
-    D3D11_TEXTURE2D_DESC desc = {};
-    desc.Width = n_resolution;
-    desc.Height = n_resolution;
-    desc.MipLevels = desc.ArraySize = 1;
-    desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    desc.SampleDesc.Count = 1;
-    desc.Usage = D3D11_USAGE_DEFAULT;
-    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
 
-    ID3D11Texture2D* texture = nullptr;
-    HRESULT hr = g_pd3dDevice->CreateTexture2D(&desc, &subrecData, &texture);
-    if (FAILED(hr)) {
-        OutputDebugStringA("Failed to create texture\n");
-        return;
+    if (Terrain) {
+        g_pCamera->SetTarget(XMFLOAT3(n_resolution / 2, n_height / 2, n_resolution / 2));
+        g_GameObject.noiseGenerateTerrain(&map, n_resolution);
+        g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
+        map.clear();
+        map.shrink_to_fit();
     }
 
-    D3D11_SHADER_RESOURCE_VIEW_DESC srvd = {};
-    srvd.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    srvd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-    srvd.Texture2D.MipLevels = 1;
 
-    hr = g_pd3dDevice->CreateShaderResourceView(texture, &srvd, &n_texture);
-    if (FAILED(hr)) {
+    if (Image) {
+        D3D11_SUBRESOURCE_DATA subrecData = {};
+        subrecData.pSysMem = n_pixels;
+        subrecData.SysMemPitch = n_resolution * sizeof(uint32_t);
+
+        D3D11_TEXTURE2D_DESC desc = {};
+        desc.Width = n_resolution;
+        desc.Height = n_resolution;
+        desc.MipLevels = desc.ArraySize = 1;
+        desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        desc.SampleDesc.Count = 1;
+        desc.Usage = D3D11_USAGE_DEFAULT;
+        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+        ID3D11Texture2D* texture = nullptr;
+        HRESULT hr = g_pd3dDevice->CreateTexture2D(&desc, &subrecData, &texture);
+        if (FAILED(hr)) {
+            OutputDebugStringA("Failed to create texture\n");
+            return;
+        }
+
+        D3D11_SHADER_RESOURCE_VIEW_DESC srvd = {};
+        srvd.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        srvd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+        srvd.Texture2D.MipLevels = 1;
+
+        hr = g_pd3dDevice->CreateShaderResourceView(texture, &srvd, &n_texture);
+        if (FAILED(hr)) {
+            texture->Release();
+            return;
+        }
+
         texture->Release();
-        return;
+        texture = nullptr;
+        delete[] n_pixels;
+        n_pixels = nullptr;
     }
-
-    texture->Release();
-    texture = nullptr;
-    delete[] n_pixels;
-    n_pixels = nullptr;
 }
 
 //--------------------------------------------------------------------------------------
@@ -613,7 +656,7 @@ HRESULT		InitRunTimeParameters()
     n_Simplex.SetFrequency(n_SimplexFrequency);
     n_Cellular.SetNoiseType(n_Cellular.NoiseType_Cellular);
     n_Cellular.SetFrequency(n_CellularFrequency);
-    GenerateNoise();
+    GenerateNoiseImageAndTerrain(TRUE, FALSE);
 
     g_GameObject.setDetailRoughness(t_detail, t_roughness);
     g_GameObject.generateTerrain();
@@ -704,8 +747,8 @@ HRESULT		InitRunTimeParameters()
 // ***************************************************************************************
 HRESULT		InitWorld(int width, int height)
 {
-    float val = pow(2, t_detail) * 1.5;
-    g_pCamera = new Camera(XMFLOAT3(val, val, val), XMFLOAT3(-1, -1, -1), XMFLOAT3(0.0f, 1.0f, 0.0f));
+    float val = (pow(2, t_detail) + 1) /2;
+    g_pCamera = new Camera(XMFLOAT3(val, val, val), val, XMFLOAT3(0.0f, 1.0f, 0.0f));
 
 	// Initialize the projection matrix
     constexpr float fovAngleY = XMConvertToRadians(60.0f);
@@ -813,27 +856,19 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
         case 27:
             PostQuitMessage(0);
             break;
-        case 'W':
-            g_pCamera->MoveForward(movement);  // Adjust distance as needed
-            break;
-        case 'A':
-            g_pCamera->StrafeLeft(movement);  // Adjust distance as needed
-            break;
-        case 'S':
-            g_pCamera->MoveBackward(movement);  // Adjust distance as needed
-            break;
-        case 'D':
-            g_pCamera->StrafeRight(movement);  // Adjust distance as needed
-            break;
-        case 'E':
-            g_pCamera->MoveUpward(movement);
-            break;
-        case 'Q':
-            g_pCamera->MoveDownward(movement);
-            break;
         }
         break;
 
+    case WM_MOUSEWHEEL:
+    {
+        // Scroll direction
+        int delta = GET_WHEEL_DELTA_WPARAM(wParam);
+        float zoomFactor = 0.1f; // Adjust sensitivity
+
+        // Zoom in/out
+        g_pCamera->Zoom(-delta * zoomFactor);
+        break;
+    }
     case WM_RBUTTONDOWN:
         mouseDownR = true;
         break;
@@ -842,13 +877,73 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
         break;
     case WM_LBUTTONDOWN:
         mouseDownL = true;
+
         break;
     case WM_LBUTTONUP:
         mouseDownL = false;
         break;
     case WM_MOUSEMOVE:
     {
+        static bool isFirstClick = true;
         if (mouseDownL) {
+             // Track if it's the first click
+            static POINTS lastMousePos = {}; // Persist last mouse position across frames
+            if (isFirstClick) {
+                // Initialize lastMousePos on the first click
+                lastMousePos = MAKEPOINTS(lParam);
+                isFirstClick = false;
+            }
+            if (GetAsyncKeyState(VK_CONTROL) & 0x8000) 
+            {
+                POINTS mousePos = MAKEPOINTS(lParam);
+
+                // Calculate the delta of the mouse movement
+                POINTS delta = { mousePos.x - lastMousePos.x, mousePos.y - lastMousePos.y };
+
+                // Define a sensitivity for the movement
+
+                // Load camera position and target position
+                XMFLOAT3 cameraPos = g_pCamera->GetPosition();
+                XMFLOAT3 targetPos = g_pCamera->GetTarget();
+
+                // Compute the direction vector from the camera to the target
+                XMVECTOR camPosVec = XMLoadFloat3(&cameraPos);
+                XMVECTOR targetPosVec = XMLoadFloat3(&targetPos);
+                XMVECTOR viewDirection = XMVector3Normalize(targetPosVec - camPosVec); // Forward direction
+
+                // Calculate the right and up vectors relative to the view direction
+                XMVECTOR upVec = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f); // World up vector
+                XMVECTOR rightVec = XMVector3Normalize(XMVector3Cross(upVec, viewDirection)); // Right direction
+                upVec = XMVector3Normalize(XMVector3Cross(viewDirection, rightVec)); // Adjusted up direction
+
+                // Scale movement by sensitivity and delta
+                XMVECTOR deltaMovement = XMVectorAdd(
+                    XMVectorScale(rightVec, -delta.x * c_sensitivity), // Left-right movement
+                    XMVectorScale(upVec, delta.y * c_sensitivity)    // Up-down movement (inverted to match screen coordinates)
+                );
+
+                // Get the current target and update its position
+                XMVECTOR newTargetVec = targetPosVec + deltaMovement;
+
+                // Compute the delta for the camera as well (to keep look direction constant)
+                XMVECTOR targetDelta = newTargetVec - targetPosVec;
+
+                // Update the target and camera positions
+                XMFLOAT3 newTargetPos;
+                XMStoreFloat3(&newTargetPos, newTargetVec);
+
+                g_pCamera->SetOnlyTarget(newTargetPos);
+                g_pCamera->UpdatePositionWithTargetMove(XMFLOAT3(
+                    XMVectorGetX(targetDelta),
+                    XMVectorGetY(targetDelta),
+                    XMVectorGetZ(targetDelta)
+                ));
+
+                // Save the last mouse position for the next frame
+                lastMousePos = mousePos;
+
+                break; // Exit the loop after processing the input
+            }
             XMFLOAT3 cameraPosition = g_pCamera->GetPosition();
             XMVECTOR rayOrigin = XMLoadFloat3(&cameraPosition);
             POINTS mousePos = MAKEPOINTS(lParam);
@@ -882,6 +977,7 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
             }
             break;
         }
+        else { isFirstClick = true; }
         if (mouseDownR)
         {
             // Get the dimensions of the window
@@ -906,17 +1002,17 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
             delta.x = cursorPos.x - windowCenter.x;
             delta.y = -(cursorPos.y - windowCenter.y);
 
+            // Sensitivity factor
+            const float sensitivity = 0.001f;
+
             // Update the camera with the delta
-            // (You may need to convert POINT to POINTS or use the deltas as is)
-            g_pCamera->UpdateLookAt({ static_cast<short>(delta.x), static_cast<short>(delta.y) });
+            g_pCamera->Rotate(delta.x * sensitivity, -delta.y * sensitivity);
 
             // Recenter the cursor
             SetCursorPos(windowCenter.x, windowCenter.y);
-            break;
         }
+        break;
     }
-    break;
-   
     case WM_ACTIVATE:
         if (LOWORD(wParam) != WA_INACTIVE) {
             CenterMouseInWindow(hWnd);
@@ -1018,34 +1114,6 @@ void saveTerrain()
     }
 }
 
-void GenerateTerrainWithNoise()
-{
-    std::vector<std::vector<float>> map(n_resolution, std::vector<float>(n_resolution));
-    for (int x = 0; x < n_resolution - 1; x++) {
-
-        for (int y = 0; y < n_resolution - 1; y++) {
-            float colour = 0;
-            if (n_PerlinOn) { colour += GenerateNoiseThread(&n_Perlin, &n_PerlinOctaves, &x, &y) * n_PerlinWeight; }
-            if (n_SimplexOn) { colour += GenerateNoiseThread(&n_Simplex, &n_SimplexOctaves, &x, &y) * n_SimplexWeight; }
-            if (n_CellularOn) { colour += GenerateNoiseThread(&n_Cellular, &n_CellularOctaves, &x, &y) * n_CellularWeight; }
-
-            float maxWeightSum = n_PerlinOn * n_PerlinWeight +
-                n_SimplexOn * n_SimplexWeight +
-                n_CellularOn * n_CellularWeight;
-
-            float normalizedColour = (colour / maxWeightSum) * 0.5f + 0.5f;
-            float temp = pow(normalizedColour, n_Exponent);
-            temp = (temp * n_height);
-            temp = max(n_floor, min(n_height, temp));
-            map[x][y] = temp;
-        }
-    }
-    g_GameObject.noiseGenerateTerrain(&map, n_resolution);
-    g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
-    map.clear();
-    map.shrink_to_fit();
-}
-
 static void HelpMarker(const char* desc)
 { 
     ImGui::SameLine();
@@ -1125,55 +1193,53 @@ void NoiseGUI() {
     ImGui::SetNextItemWidth(SliderWidth * ScaleX);
     if (ImGui::SliderInt("Size", &n_resolution, 32, 2048))
     {
-        GenerateNoise();
-        GenerateTerrainWithNoise();
+        GenerateNoiseImageAndTerrain(TRUE, TRUE);
     }
     HelpMarker("");
     ImGui::SetNextItemWidth(SliderWidth * ScaleX);
     if (ImGui::SliderFloat("Redistribution", &n_Exponent, 0.01f, 10.0f))
     {
-        GenerateTerrainWithNoise();
+        GenerateNoiseImageAndTerrain(FALSE, TRUE);
+
     }
     HelpMarker("");
     ImGui::SetNextItemWidth(SliderWidth * ScaleX);
     if (ImGui::SliderFloat("Height", &n_height, 1, 1024))
     {
-        GenerateTerrainWithNoise();
+        GenerateNoiseImageAndTerrain(FALSE, TRUE);
+
     }
 
     ImGui::SetNextItemWidth(SliderWidth * ScaleX);
     if (ImGui::SliderFloat("Floor/Sea Level", &n_floor, 0, 1023))
     {
-        GenerateTerrainWithNoise();
+        GenerateNoiseImageAndTerrain(TRUE, FALSE);
+
     }
     ImGui::Text("");
     ImGui::Text("Perlin Noise Parameters");
     ImGui::SetNextItemWidth(SliderWidth * ScaleX);
     if (ImGui::Checkbox("P Enabled", &n_PerlinOn))
     {
-        GenerateNoise();
-        GenerateTerrainWithNoise();
+        GenerateNoiseImageAndTerrain(TRUE, TRUE);
     };
     HelpMarker("");
     if (n_PerlinOn) {
         ImGui::SetNextItemWidth(SliderWidth * ScaleX);
         if (ImGui::SliderInt("P Octaves", &n_PerlinOctaves, 1, 5)) {
-            GenerateNoise();
-            GenerateTerrainWithNoise();
+            GenerateNoiseImageAndTerrain(TRUE, TRUE);
         }
         HelpMarker("");
         if (ImGui::Button("New P Seed"))
         {
             n_Perlin.SetSeed(RandomSeed());
-            GenerateNoise();
-            GenerateTerrainWithNoise();
+            GenerateNoiseImageAndTerrain(TRUE, TRUE);
         }
         HelpMarker("");
         ImGui::SetNextItemWidth(SliderWidth * ScaleX);
         if (ImGui::SliderFloat("P Intensity", &n_PerlinWeight, 0.01f, 1.0f))
         {
-            GenerateNoise();
-            GenerateTerrainWithNoise();
+            GenerateNoiseImageAndTerrain(TRUE, TRUE);
         }
         HelpMarker("");
         ImGui::SetNextItemWidth(SliderWidth * ScaleX);
@@ -1181,8 +1247,7 @@ void NoiseGUI() {
         if (ImGui::SliderFloat("P Scale", &n_PerlinFrequency, 0.001f, 0.1f))
         {
             n_Perlin.SetFrequency(n_PerlinFrequency);
-            GenerateNoise();
-            GenerateTerrainWithNoise();
+            GenerateNoiseImageAndTerrain(TRUE, TRUE);
         }
         HelpMarker("");
     }
@@ -1191,8 +1256,7 @@ void NoiseGUI() {
     ImGui::Text("Simplex Noise Parameters");
     if (ImGui::Checkbox("S Enabled", &n_SimplexOn))
     {
-        GenerateNoise();
-        GenerateTerrainWithNoise();
+        GenerateNoiseImageAndTerrain(TRUE, TRUE);
     };
     HelpMarker("");
 
@@ -1200,23 +1264,20 @@ void NoiseGUI() {
         ImGui::SetNextItemWidth(SliderWidth * ScaleX);
         if (ImGui::SliderInt("S Octaves", &n_SimplexOctaves, 1, 5)) 
         {
-            GenerateNoise();
-            GenerateTerrainWithNoise();
+            GenerateNoiseImageAndTerrain(TRUE, TRUE);
         };
         HelpMarker("");
         if (ImGui::Button("New S Seed"))
         {
             n_Simplex.SetSeed(RandomSeed()); 
-            GenerateNoise();
-            GenerateTerrainWithNoise();
+            GenerateNoiseImageAndTerrain(TRUE, TRUE);
         }
         HelpMarker("");
         ImGui::SetNextItemWidth(SliderWidth * ScaleX);
 
         if (ImGui::SliderFloat("S Intensity", &n_SimplexWeight, 0.01f, 1.0f))
         {
-            GenerateNoise();
-            GenerateTerrainWithNoise();
+            GenerateNoiseImageAndTerrain(TRUE, TRUE);
         }
         HelpMarker("");
         ImGui::SetNextItemWidth(SliderWidth * ScaleX);
@@ -1224,8 +1285,7 @@ void NoiseGUI() {
         if (ImGui::SliderFloat("S Scale", &n_SimplexFrequency, 0.001f, 0.1f))
         {
             n_Simplex.SetFrequency(n_SimplexFrequency);
-            GenerateNoise();
-            GenerateTerrainWithNoise();
+            GenerateNoiseImageAndTerrain(TRUE, TRUE);
         }
         HelpMarker("");
     }
@@ -1234,31 +1294,27 @@ void NoiseGUI() {
     ImGui::Text("Cellular Noise Parameters");
     if (ImGui::Checkbox("C Enabled", &n_CellularOn))
     {
-        GenerateNoise();
-        GenerateTerrainWithNoise();
+        GenerateNoiseImageAndTerrain(TRUE, TRUE);
     };
     HelpMarker("");
     if (n_CellularOn) {
         ImGui::SetNextItemWidth(SliderWidth * ScaleX);
         if (ImGui::SliderInt("C Octaves", &n_CellularOctaves, 1, 5)) 
         {
-            GenerateNoise();
-            GenerateTerrainWithNoise();
+            GenerateNoiseImageAndTerrain(TRUE, TRUE);
         };
         HelpMarker("");
         if (ImGui::Button("New C Seed"))
         {
             n_Cellular.SetSeed(RandomSeed());
-            GenerateNoise();
-            GenerateTerrainWithNoise();
+            GenerateNoiseImageAndTerrain(TRUE, TRUE);
         }
         HelpMarker("");
         ImGui::SetNextItemWidth(SliderWidth* ScaleX);
 
         if (ImGui::SliderFloat("C Intensity", &n_CellularWeight, 0.01f, 1.0f))
         {
-            GenerateNoise();
-            GenerateTerrainWithNoise();
+            GenerateNoiseImageAndTerrain(TRUE, TRUE);
         }
         HelpMarker("");
         ImGui::SetNextItemWidth(SliderWidth * ScaleX);
@@ -1266,15 +1322,10 @@ void NoiseGUI() {
         if (ImGui::SliderFloat("C Scale", &n_CellularFrequency, 0.001f, 0.1f))
         {
             n_Cellular.SetFrequency(n_CellularFrequency);
-            GenerateNoise();
-            GenerateTerrainWithNoise();
+            GenerateNoiseImageAndTerrain(TRUE, TRUE);
         };
         HelpMarker("");
     }
-    //if (ImGui::Button("Generate terrain with noise"))
-    //{
-    //    GenerateTerrainWithNoise();
-    //}
     ImGui::End();
 }
 void NoiseImage() {
@@ -1303,7 +1354,8 @@ void View() {
     ImGui::SetNextWindowPos(ImVec2(screenWidth - (10 + UIWidthR) * ScaleX, 10 * ScaleY + height));
     ImGui::Begin("View", 0, ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::Text("Camera Position: %.2f, %.2f, %.2f", g_pCamera->GetPosition().x, g_pCamera->GetPosition().y, g_pCamera->GetPosition().z);
-    ImGui::InputFloat("Camera Speed", &movement);
+    ImGui::Text("Camera Rotation Point: %.2f, %.2f, %.2f", g_pCamera->GetTarget().x, g_pCamera->GetTarget().y, g_pCamera->GetTarget().z);
+    ImGui::SliderFloat("CTRL+LCLICK Sens", &c_sensitivity, 0.05, 1.0f);
     ImGui::Checkbox("wireFrame", &wireframeEnabled);
     height += ImGui::GetWindowHeight();
     ImGui::End();
@@ -1312,7 +1364,6 @@ void Brush() {
     ImGui::SetNextWindowSizeConstraints(ImVec2(UIWidthR * ScaleX, 80 * ScaleY), ImVec2(UIWidthR * ScaleX, 500 * ScaleY));
     ImGui::SetNextWindowPos(ImVec2(screenWidth - (10 + UIWidthR) * ScaleX, 10 * ScaleY + height));
     ImGui::Begin("Terrain Brush", 0, ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::Text("Camera Position: %.2f, %.2f, %.2f", g_pCamera->GetPosition().x, g_pCamera->GetPosition().y, g_pCamera->GetPosition().z);
     ImGui::Checkbox("Flatten Brush", &b_FlatBool);
     ImGui::InputInt("Flatten Size", &b_FlatSize);
     ImGui::InputFloat("Max Flatten Difference", &b_MaxFlatDifference);
@@ -1353,8 +1404,6 @@ void Render()
 
         normalDraw = false;
         wireDraw = true;
-
-
     }
 
     if (wireDraw && wireframeEnabled) {

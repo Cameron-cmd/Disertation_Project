@@ -12,124 +12,109 @@ using namespace DirectX;
 class Camera
 {
 public:
-    Camera(XMFLOAT3 posIn, XMFLOAT3 lookDirIn, XMFLOAT3 upIn )
+    Camera(XMFLOAT3 targetIn, float distanceIn, XMFLOAT3 upIn )
     {
-        position = posIn;
-        lookDir = lookDirIn;
+        target = targetIn;
+        distance = distanceIn;
         up = upIn;
+        yaw = 0.0f;
+        pitch = 0.0f;
 
         XMStoreFloat4x4(&viewMatrix, XMMatrixIdentity());
+        UpdatePosition();
+        UpdateLookDir();
     }
-    void SetPosition(XMFLOAT3 pos) { position = pos; }
+
+    void Rotate(float deltaYaw, float deltaPitch) 
+    {
+        yaw += deltaYaw;
+        pitch = std::clamp(pitch + deltaPitch, -XM_PIDIV2 + 0.01f, XM_PIDIV2 - 0.01f);
+        UpdatePosition();
+    }
+
+    void Zoom(float deltaDistance)
+    {
+        distance = max(1.0f, distance + deltaDistance);
+        UpdatePosition();
+    }
+
     XMFLOAT3 GetPosition() { return position; }
-
-    void MoveUpward(float distance)
-    {
-        // Get the current up vector
-        XMVECTOR upVec = XMLoadFloat3(&up);
-        XMVECTOR posVec = XMLoadFloat3(&position);
-
-        // Move upwards by adding the scaled up vector to the position
-        XMStoreFloat3(&position, XMVectorMultiplyAdd(XMVectorReplicate(distance), upVec, posVec));
-    }
-
-    void MoveDownward(float distance)
-    {
-        MoveUpward(-distance);
-    }
-
-    void MoveForward(float distance)
-    {
-        // Get the normalized forward vector (camera's look direction)
-        XMVECTOR forwardVec = XMVector3Normalize(XMLoadFloat3(&lookDir));
-        XMVECTOR posVec = XMLoadFloat3(&position);
-
-        // Move in the direction the camera is facing
-        XMStoreFloat3(&position, XMVectorMultiplyAdd(XMVectorReplicate(distance), forwardVec, posVec));
-    }
-
-    void StrafeLeft(float distance)
-    {
-        // Get the current look direction and up vector
-        XMVECTOR lookDirVec = XMLoadFloat3(&lookDir);
-        XMVECTOR upVec = XMLoadFloat3(&up);
-
-        // Calculate the right vector (side vector of the camera)
-        XMVECTOR rightVec = XMVector3Normalize(XMVector3Cross(upVec, lookDirVec));
-        XMVECTOR posVec = XMLoadFloat3(&position);
-
-        // Move left by moving opposite to the right vector
-        XMStoreFloat3(&position, XMVectorMultiplyAdd(XMVectorReplicate(-distance), rightVec, posVec));
-    }
-
-    void MoveBackward(float distance)
-    {
-        // Call MoveForward with negative distance to move backward
-        MoveForward(-distance);
-    }
-
-    void StrafeRight(float distance)
-    {
-        // Call StrafeLeft with negative distance to move right
-        StrafeLeft(-distance);
-    }
-
-    void UpdateLookAt(POINTS delta)
-    {
-        // Sensitivity factor for mouse movement
-        const float sensitivity = 0.001f;
-    
-        // Apply sensitivity
-        float dx = delta.x * sensitivity; // Yaw change
-        float dy = delta.y * sensitivity; // Pitch change
-    
-    
-        // Get the current look direction and up vector
-        // Convert look direction to spherical coordinates
-        float yaw = atan2f(lookDir.x, lookDir.z);
-        float pitch = asinf(lookDir.y);
-
-        // Update yaw and pitch based on mouse movement
-        yaw += dx;
-        pitch =  std::clamp(pitch + dy, -XM_PIDIV2 + 0.01f, XM_PIDIV2 - 0.01f);
-
-        // Recalculate look direction using spherical coordinates
-        XMVECTOR newLookDir = XMVectorSet(
-            cosf(pitch) * sinf(yaw),
-            sinf(pitch),
-            cosf(pitch) * cosf(yaw),
-            0.0f
-        );
-
-        newLookDir = XMVector3Normalize(newLookDir);
-
-        // Update class variables
-        XMStoreFloat3(&lookDir, newLookDir);
-    }
-
-    void Update() { UpdateViewMatrix(); }
-
+    XMFLOAT3 GetTarget() { return target; }
+    void SetTarget(XMFLOAT3 newTarget) { target = newTarget; UpdatePosition(); UpdateLookDir(); }
+    void SetOnlyTarget (XMFLOAT3 newTarget) { target = newTarget; }
     XMMATRIX GetViewMatrix() const
     {
-        UpdateViewMatrix();
         return XMLoadFloat4x4(&viewMatrix);
     }
 
-private:
-    void UpdateViewMatrix() const
+    void UpdatePositionWithTargetMove(const XMFLOAT3& targetMoveDelta)
     {
-        // Calculate the look-at point based on the position and look direction
-        XMVECTOR posVec = XMLoadFloat3(&position);
-        XMVECTOR lookDirVec = XMLoadFloat3(&lookDir);
-        XMVECTOR lookAtPoint = posVec + lookDirVec; // This is the new look-at point
+        // Move the camera by the same amount as the target
+        position.x += targetMoveDelta.x;
+        position.y += targetMoveDelta.y;
+        position.z += targetMoveDelta.z;
 
-        // Update the view matrix to look from the camera's position to the look-at point
-        XMStoreFloat4x4(&viewMatrix, XMMatrixLookAtLH(posVec, lookAtPoint, XMLoadFloat3(&up)));
+        // Recalculate the view matrix (the camera will still look at the target)
+        UpdateViewMatrix();
     }
 
+    XMFLOAT3 GetRight() const
+    {
+        XMVECTOR rightVec = XMVector3Cross(XMLoadFloat3(&lookDir), XMLoadFloat3(&up));
+        XMFLOAT3 right;
+        XMStoreFloat3(&right, XMVector3Normalize(rightVec));
+        return right;
+    }
+
+    XMFLOAT3 GetUp() const
+    {
+        // You can directly return the up vector (as it doesn't change much)
+        return up;
+    }
+
+    XMFLOAT3 GetLookDir() { return lookDir; }
+private:
+
+    void UpdateLookDir()
+    {
+        // Calculate the initial look direction based on the current yaw and pitch
+        float x = distance * cosf(pitch) * sinf(yaw);
+        float y = distance * sinf(pitch);
+        float z = distance * cosf(pitch) * cosf(yaw);
+
+        XMVECTOR directionVec = XMVectorSet(x, y, z, 0.0f);
+        XMVECTOR targetVec = XMLoadFloat3(&target);
+
+        // Calculate the look direction from the camera to the target
+        XMVECTOR lookDirVec = XMVector3Normalize(targetVec - directionVec);
+
+        // Store it in the lookDir variable
+        XMStoreFloat3(&lookDir, lookDirVec);
+    }
+
+    void UpdateViewMatrix()
+    {
+        XMStoreFloat4x4(&viewMatrix, XMMatrixLookAtLH(XMLoadFloat3(&position), XMLoadFloat3(&target), XMLoadFloat3(&up)));
+    }
+
+    void UpdatePosition()
+    {
+        float x = distance * cosf(pitch) * sinf(yaw);
+        float y = distance * sinf(pitch);
+        float z = distance * cosf(pitch) * cosf(yaw);
+
+        position = { target.x + x, target.y + y, target.z + z };
+
+        UpdateViewMatrix();
+    }
+
+    XMFLOAT3 target;
+    float distance;
+    float pitch;
+    float yaw;
     XMFLOAT3 position;
-    XMFLOAT3 lookDir;
     XMFLOAT3 up;
+    XMFLOAT3 lookDir;
     mutable XMFLOAT4X4 viewMatrix;
 };
 
