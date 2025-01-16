@@ -88,6 +88,7 @@ void DrawableGameObject::generateTerrain()
 	m_map = newTerrain._map;
 	m_size = newTerrain._size;
 	m_max = newTerrain._max;
+	hydraulicErosionClass.scale = m_max;
 }
 
 void DrawableGameObject::printIndicies()
@@ -113,6 +114,10 @@ HRESULT DrawableGameObject::initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceConte
 {
 	if (m_indicesArray) { delete[] m_indicesArray;  m_indicesArray = nullptr; }
 	if (m_verticesArray) { delete[] m_verticesArray;  m_verticesArray = nullptr; }
+	if (m_pIndexBuffer) { m_pIndexBuffer->Release(); m_pIndexBuffer = nullptr; }
+	if (m_pVertexBuffer) { m_pVertexBuffer->Release(); m_pVertexBuffer = nullptr; }
+	if (m_pMaterialConstantBuffer) { m_pMaterialConstantBuffer->Release(); m_pMaterialConstantBuffer = nullptr; }
+	if (m_pSamplerLinear) { m_pSamplerLinear->Release(); m_pSamplerLinear = nullptr; }
 
 	int vertexCount = 0;
 	int indexCount = 0;

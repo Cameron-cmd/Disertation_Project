@@ -59,7 +59,7 @@ public:
 	INT									GetIndexCount() { return m_IndexCount; }
 	float GetHeight(int x, int y) { return m_map[x][y]; }
 	void SetHeight(int x, int y, float z) { m_map[x][y] = z; }
-
+	HydraulicErosion					hydraulicErosionClass;
 private:
 	
 	XMFLOAT4X4							m_World;
@@ -82,6 +82,5 @@ private:
 	FLOAT								m_roughness;
 	std::vector<std::vector<float>>		m_map;
 	TerrainGenDS						newTerrain;
-	HydraulicErosion					hydraulicErosionClass;
 };
 

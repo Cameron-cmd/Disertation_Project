@@ -24,8 +24,13 @@
 
 #include "FastNoiseLite.h"
 #include <random>
+#include <thread>
 
 Camera* g_pCamera;
+
+#define SliderWidth 250
+#define UIWidthL 385
+#define UIWidthR 300
 
 
 //--------------------------------------------------------------------------------------
@@ -82,20 +87,27 @@ XMMATRIX                obj_rotation = XMMatrixRotationX(0);
 // DiamondSquare
 int                     t_detail = 9;
 float                   t_roughness = 0.5;
-int                     h_cycles = 100;
+int                     h_cycles = 200000;
 
 float                   n_Exponent = 1.0f;
 
 bool                    n_PerlinOn = true;
+int                     n_PerlinOctaves = 1;
 float                   n_PerlinWeight = 1.0f;
-float                   n_PerlinFrequency = 0.1f;
+float                   n_PerlinFrequency = 0.01f;
 bool                    n_SimplexOn = false;
+int                     n_SimplexOctaves = 1;
 float                   n_SimplexWeight = 1.0f;
-float                   n_SimplexFrequency = 0.1f;
+float                   n_SimplexFrequency = 0.01f;
 bool                    n_CellularOn = false;
+int                     n_CellularOctaves = 1;
 float                   n_CellularWeight = 1.0f;
-float                   n_CellularFrequency = 0.1f;
+float                   n_CellularFrequency = 0.01f;
 int                     n_resolution = 256;
+float                   n_height = 256;
+float                   n_floor = 0;
+
+
 
 uint32_t*               n_pixels;
 
@@ -114,11 +126,21 @@ bool normalDraw = true;
 bool wireDraw = true;
 bool wireframeEnabled = false;
 
+int screenWidth;
+int screenHeight;
+
 ID3D11RasterizerState* rasterizerState;
 
 float height = 0;
 float width = 0;
 
+bool advHydro = false;
+
+float movement = 50.0f;
+
+bool b_FlatBool = false;
+int b_FlatSize = 2;
+float b_MaxFlatDifference = 2.0f;
 //--------------------------------------------------------------------------------------
 // Entry point to the program. Initializes everything and goes into a message processing 
 // loop. Idle time is used to render the scene.
@@ -195,8 +217,8 @@ HRESULT InitWindow( HINSTANCE hInstance, int nCmdShow )
     // Create window
     RECT desktop;
     GetWindowRect(GetDesktopWindow(), &desktop);
-    int screenWidth = desktop.right;
-    int screenHeight = desktop.bottom;
+    screenWidth = desktop.right;
+    screenHeight = desktop.bottom;
     g_hInst = hInstance;
     RECT rc = { 0, 0, screenWidth, screenHeight};
 
@@ -270,6 +292,21 @@ int RandomSeed()
     return dis(rng);
 }
 
+float GenerateNoiseThread(FastNoiseLite* noise, int* octaves, int* x, int* y)
+{
+    float colour = 0;
+    float weight = 1.0f;
+    float scale = 1.0f;
+    float totalDivide = 0;
+    for (int i = 0; i < *octaves; i++) {
+        colour += weight * noise->GetNoise((float)*x * scale , (float)*y * scale);
+        totalDivide += weight;
+        weight = weight * 0.5;
+        scale = scale * 2;
+    }
+    return colour / totalDivide;
+}
+
 void GenerateNoise()
 {
     delete[] n_pixels;
@@ -279,18 +316,22 @@ void GenerateNoise()
 
     for (int x = 0; x < n_resolution; x++) {
         for (int y = 0; y < n_resolution; y++) {
-            float divideCount = 0;
-            float tempColour = 0;
-            if (n_PerlinOn) { tempColour += n_PerlinWeight * n_Perlin.GetNoise((float)x, (float)y); divideCount += n_PerlinWeight; }
-            if (n_SimplexOn) { tempColour += n_SimplexWeight * n_Simplex.GetNoise((float)x, (float)y); divideCount += n_SimplexWeight; }
-            if (n_CellularOn) { tempColour += n_CellularWeight * n_Cellular.GetNoise((float)x, (float)y); divideCount += n_CellularWeight; }
-            tempColour = tempColour / max(1.0f, divideCount); // Avoid divide by zero
-            int temp = (int)RatioValueConverter(-1.0f, 1.0f, 0.0f, 250.0f, tempColour);
-            temp = max(0, min(255, temp)); // Clamp for safety
+            float colour = 0;
+            if (n_PerlinOn) { colour += GenerateNoiseThread(&n_Perlin, &n_PerlinOctaves, &x, &y) * n_PerlinWeight; }
+            if (n_SimplexOn) { colour += GenerateNoiseThread(&n_Simplex, &n_SimplexOctaves, &x, &y) * n_SimplexWeight; }
+            if (n_CellularOn) { colour += GenerateNoiseThread(&n_Cellular, &n_CellularOctaves, &x, &y) * n_CellularWeight; }
+            
+            float maxWeightSum = n_PerlinOn * n_PerlinWeight +
+                n_SimplexOn * n_SimplexWeight +
+                n_CellularOn * n_CellularWeight;
+
+            float normalizedColour = (colour / maxWeightSum) * 0.5f + 0.5f;  // Normalize to [0, 1]
+            int temp = (int)(normalizedColour * 255);
+
+            temp = max(0 , min(255, temp)); // Clamp for safety
             n_pixels[x + y * n_resolution] = (temp) | (temp << 8) | (temp << 16) | (255 << 24);
         }
     }
-
     if (n_texture) {
         n_texture->Release();
         n_texture = nullptr;
@@ -328,6 +369,7 @@ void GenerateNoise()
     }
 
     texture->Release();
+    texture = nullptr;
     delete[] n_pixels;
     n_pixels = nullptr;
 }
@@ -566,11 +608,11 @@ HRESULT InitDevice()
 HRESULT		InitRunTimeParameters()
 {
     n_Perlin.SetNoiseType(n_Perlin.NoiseType_Perlin);
-    n_Perlin.SetFrequency(n_PerlinFrequency/10);
+    n_Perlin.SetFrequency(n_PerlinFrequency);
     n_Simplex.SetNoiseType(n_Simplex.NoiseType_OpenSimplex2);
-    n_Simplex.SetFrequency(n_SimplexFrequency/10);
+    n_Simplex.SetFrequency(n_SimplexFrequency);
     n_Cellular.SetNoiseType(n_Cellular.NoiseType_Cellular);
-    n_Cellular.SetFrequency(n_CellularFrequency/10);
+    n_Cellular.SetFrequency(n_CellularFrequency);
     GenerateNoise();
 
     g_GameObject.setDetailRoughness(t_detail, t_roughness);
@@ -755,8 +797,8 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
     PAINTSTRUCT ps;
     HDC hdc;
 
-    float movement = 10.0f;
-    static bool mouseDown = false;
+    static bool mouseDownR = false;
+    static bool mouseDownL = false;
 
     extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
     if (ImGui_ImplWin32_WndProcHandler(hWnd, message, wParam, lParam))
@@ -793,80 +835,85 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
         break;
 
     case WM_RBUTTONDOWN:
-        mouseDown = true;
+        mouseDownR = true;
         break;
     case WM_RBUTTONUP:
-        mouseDown = false;
+        mouseDownR = false;
         break;
     case WM_LBUTTONDOWN:
-    {
-        XMFLOAT3 cameraPosition = g_pCamera->GetPosition();
-        XMVECTOR rayOrigin = XMLoadFloat3(&cameraPosition);
-        POINTS mousePos = MAKEPOINTS(lParam);
-        XMFLOAT2 temp = XMFLOAT2(mousePos.x, mousePos.y);
-        XMVECTOR cursorPos = XMLoadFloat2(&temp);
-        RECT rect;
-        GetClientRect(hWnd, &rect);
-        XMMATRIX mGO = XMLoadFloat4x4(g_GameObject.getTransform());
-        XMMATRIX World = XMMatrixTranspose(mGO);
-        XMVECTOR rayDirection = XMVector3Normalize(XMVector3Unproject(cursorPos, 0, 0, (rect.right - rect.left), (rect.bottom - rect.top), 0.0f, 1.0f, g_Projection, g_pCamera->GetViewMatrix(), World) - rayOrigin);
-
-        float stepSize = 0.5f;
-        float currentDistance = 0.0f;
-        int maxDistance = 5000;
-        XMVECTOR Position = rayOrigin;
-        while (currentDistance < maxDistance)
-        {
-            float x = XMVectorGetX(Position);
-            float z = XMVectorGetZ(Position);
-            float size = g_GameObject.GetSize();
-            if (x <= size && x >= 0 && z <= size && z >= 0) {
-                float height = g_GameObject.GetHeight((int)x, int(z));
-                if (abs(height - XMVectorGetY(Position) <= 1)) {
-                    g_GameObject.SetHeight((int)x, (int)z, height - 5);
-                    g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
-                    break;
-                }
-            }
-            Position += rayDirection * stepSize;
-            currentDistance += stepSize;
-        }
+        mouseDownL = true;
         break;
-    }
+    case WM_LBUTTONUP:
+        mouseDownL = false;
+        break;
     case WM_MOUSEMOVE:
     {
-        if (!mouseDown)
-        {
+        if (mouseDownL) {
+            XMFLOAT3 cameraPosition = g_pCamera->GetPosition();
+            XMVECTOR rayOrigin = XMLoadFloat3(&cameraPosition);
+            POINTS mousePos = MAKEPOINTS(lParam);
+            XMFLOAT2 temp = XMFLOAT2(mousePos.x, mousePos.y);
+            XMVECTOR cursorPos = XMLoadFloat2(&temp);
+            RECT rect;
+            GetClientRect(hWnd, &rect);
+            XMMATRIX mGO = XMLoadFloat4x4(g_GameObject.getTransform());
+            XMMATRIX World = XMMatrixTranspose(mGO);
+            XMVECTOR rayDirection = XMVector3Normalize(XMVector3Unproject(cursorPos, 0, 0, (rect.right - rect.left), (rect.bottom - rect.top), 0.0f, 1.0f, g_Projection, g_pCamera->GetViewMatrix(), World) - rayOrigin);
+
+            float stepSize = 0.5f;
+            float currentDistance = 0.0f;
+            int maxDistance = 5000;
+            XMVECTOR Position = rayOrigin;
+            while (currentDistance < maxDistance)
+            {
+                float x = XMVectorGetX(Position);
+                float z = XMVectorGetZ(Position);
+                float size = g_GameObject.GetSize();
+                if (x <= size && x >= 0 && z <= size && z >= 0) {
+                    float height = g_GameObject.GetHeight((int)x, int(z));
+                    if (abs(height - XMVectorGetY(Position)) <= 1) {
+                        g_GameObject.SetHeight((int)x, (int)z, height - 5);
+                        g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
+                        break;
+                    }
+                }
+                Position += rayDirection * stepSize;
+                currentDistance += stepSize;
+            }
             break;
         }
-        // Get the dimensions of the window
-        RECT rect;
-        GetClientRect(hWnd, &rect);
+        if (mouseDownR)
+        {
+            // Get the dimensions of the window
+            RECT rect;
+            GetClientRect(hWnd, &rect);
 
-        // Calculate the center position of the window
-        POINT windowCenter;
-        windowCenter.x = (rect.right - rect.left) / 2;
-        windowCenter.y = (rect.bottom - rect.top) / 2;
+            // Calculate the center position of the window
+            POINT windowCenter;
+            windowCenter.x = (rect.right - rect.left) / 2;
+            windowCenter.y = (rect.bottom - rect.top) / 2;
 
-        // Convert the client area point to screen coordinates
-        ClientToScreen(hWnd, &windowCenter);
+            // Convert the client area point to screen coordinates
+            ClientToScreen(hWnd, &windowCenter);
 
-        // Get the current cursor position
-        POINTS mousePos = MAKEPOINTS(lParam);
-        POINT cursorPos = { mousePos.x, mousePos.y };
-        ClientToScreen(hWnd, &cursorPos);
+            // Get the current cursor position
+            POINTS mousePos = MAKEPOINTS(lParam);
+            POINT cursorPos = { mousePos.x, mousePos.y };
+            ClientToScreen(hWnd, &cursorPos);
 
-        // Calculate the delta from the window center
-        POINT delta;
-        delta.x = cursorPos.x - windowCenter.x;
-        delta.y = -(cursorPos.y - windowCenter.y);
+            // Calculate the delta from the window center
+            POINT delta;
+            delta.x = cursorPos.x - windowCenter.x;
+            delta.y = -(cursorPos.y - windowCenter.y);
 
-        // Update the camera with the delta
-        // (You may need to convert POINT to POINTS or use the deltas as is)
-        g_pCamera->UpdateLookAt({ static_cast<short>(delta.x), static_cast<short>(delta.y) });
+            // Update the camera with the delta
+            // (You may need to convert POINT to POINTS or use the deltas as is)
+            g_pCamera->UpdateLookAt({ static_cast<short>(delta.x), static_cast<short>(delta.y) });
 
-        // Recenter the cursor
-        SetCursorPos(windowCenter.x, windowCenter.y);
+            // Recenter the cursor
+            SetCursorPos(windowCenter.x, windowCenter.y);
+            break;
+        }
     }
     break;
    
@@ -977,15 +1024,19 @@ void GenerateTerrainWithNoise()
     for (int x = 0; x < n_resolution - 1; x++) {
 
         for (int y = 0; y < n_resolution - 1; y++) {
-            float divideCount = 0;
-            float tempColour = 0;
-            if (n_PerlinOn) { tempColour += n_PerlinWeight * n_Perlin.GetNoise((float)x, (float)y); divideCount += n_PerlinWeight; }
-            if (n_SimplexOn) { tempColour += n_SimplexWeight * n_Simplex.GetNoise((float)x, (float)y); divideCount += n_SimplexWeight; }
-            if (n_CellularOn) { tempColour += n_CellularWeight * n_Cellular.GetNoise((float)x, (float)y); divideCount += n_CellularWeight; }
-            tempColour = tempColour / max(1, divideCount); // Avoid divide by zero
-            float temp = RatioValueConverter(-1.0f, 1.0f, 0.0f, 1.0f, tempColour);
-            temp = pow(temp, n_Exponent);
-            temp = RatioValueConverter(0.0f, 1.0f, 0.0f, 250.0f, temp);
+            float colour = 0;
+            if (n_PerlinOn) { colour += GenerateNoiseThread(&n_Perlin, &n_PerlinOctaves, &x, &y) * n_PerlinWeight; }
+            if (n_SimplexOn) { colour += GenerateNoiseThread(&n_Simplex, &n_SimplexOctaves, &x, &y) * n_SimplexWeight; }
+            if (n_CellularOn) { colour += GenerateNoiseThread(&n_Cellular, &n_CellularOctaves, &x, &y) * n_CellularWeight; }
+
+            float maxWeightSum = n_PerlinOn * n_PerlinWeight +
+                n_SimplexOn * n_SimplexWeight +
+                n_CellularOn * n_CellularWeight;
+
+            float normalizedColour = (colour / maxWeightSum) * 0.5f + 0.5f;
+            float temp = pow(normalizedColour, n_Exponent);
+            temp = (normalizedColour * n_height);
+            temp = max(n_floor, min(n_height, temp));
             map[x][y] = temp;
         }
     }
@@ -1008,13 +1059,13 @@ static void HelpMarker(const char* desc)
     }
 }
 void DSGUI() {
-    ImGui::SetNextWindowSizeConstraints(ImVec2(420 * ScaleX, 80 * ScaleY), ImVec2(420 * ScaleX, 1500 * ScaleY));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(UIWidthL * ScaleX, 80 * ScaleY), ImVec2(UIWidthL * ScaleX, 1500 * ScaleY));
     ImGui::SetNextWindowPos(ImVec2(10 * ScaleX, 10 * ScaleY));
     ImGui::Begin("Diamond Square Terrain", 0, ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::SetNextItemWidth(300 * ScaleX);
+    ImGui::SetNextItemWidth(SliderWidth * ScaleX);
     ImGui::SliderInt("Detail", &t_detail, 4, 11);
     HelpMarker("The size of the terrain, it is the 2 to the power of the detail number + 1, so a detail of 9 is a terrain of 513x513 and 10 would be 1025x1025 ");
-    ImGui::SetNextItemWidth(300 * ScaleX);
+    ImGui::SetNextItemWidth(SliderWidth * ScaleX);
     ImGui::SliderFloat("Roughness", &t_roughness, 0, 1);
     HelpMarker("0 is flat and 1 is very jagged");
     if (ImGui::Button("Generate"))
@@ -1030,56 +1081,87 @@ void DSGUI() {
     ImGui::End();
 }
 void HydroErosionGUI() {
-    ImGui::SetNextWindowSizeConstraints(ImVec2(420 * ScaleX, 80 * ScaleY), ImVec2(420 * ScaleX, 1500 * ScaleY));
-    ImGui::SetNextWindowPos(ImVec2(10 * ScaleX, 10 * ScaleY + (int)height));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(UIWidthL*0.8 * ScaleX, 80 * ScaleY), ImVec2(UIWidthL * ScaleX, 1500 * ScaleY));
+    ImGui::SetNextWindowPos(ImVec2((10 + UIWidthL) * ScaleX, 10 * ScaleY));
     ImGui::Begin("Hydraulic Erosion", 0, ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::SetNextItemWidth(300 * ScaleX);
-    ImGui::SliderInt("Cycles", &h_cycles, 100, 5000);
+    ImGui::SetNextItemWidth(SliderWidth * ScaleX);
+    ImGui::SliderInt("Cycles", &h_cycles, 2000, 200000);
     HelpMarker("");
+    ImGui::Checkbox("Advanced hydraulic erosion controls", &advHydro);
+    if (advHydro) {
+        ImGui::SetNextItemWidth(SliderWidth / 2 * ScaleX);
+        ImGui::InputFloat("Timestep", &g_GameObject.hydraulicErosionClass.dt);
+        HelpMarker("Higher = More erosion, simulated time between each erosion calculation");
+        ImGui::SetNextItemWidth(SliderWidth / 2 * ScaleX);
+        ImGui::InputFloat("Density", &g_GameObject.hydraulicErosionClass.density);
+        HelpMarker("Density of droplet, to give their inertia");
+        ImGui::SetNextItemWidth(SliderWidth / 2 * ScaleX);
+        ImGui::InputFloat("Evaporation Rate", &g_GameObject.hydraulicErosionClass.evapRate);
+        HelpMarker("Volume loss factor every timestep");
+        ImGui::SetNextItemWidth(SliderWidth / 2 * ScaleX);
+        ImGui::InputFloat("Deposition Rate", &g_GameObject.hydraulicErosionClass.depositionRate);
+        HelpMarker("Rate of at which mass is deposited to reach equilibrium");
+        ImGui::SetNextItemWidth(SliderWidth / 2 * ScaleX);
+        ImGui::InputFloat("Minimum Volume", &g_GameObject.hydraulicErosionClass.minVol);
+        HelpMarker("Volume below which a droplet is killed");
+        ImGui::SetNextItemWidth(SliderWidth / 2 * ScaleX);
+        ImGui::InputFloat("Friction", &g_GameObject.hydraulicErosionClass.friction);
+        HelpMarker("Speed loss factor every timestep");
+    }
     if (ImGui::Button("Hydraulic Errosion"))
     {
         g_GameObject.hydraulicErosion(h_cycles);
         g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
     }
-    height += ImGui::GetWindowHeight();
+    height = ImGui::GetWindowHeight();
 
     ImGui::End();
 }
 void NoiseGUI() {
-    ImGui::SetNextWindowSizeConstraints(ImVec2(420 * ScaleX, 300 * ScaleY), ImVec2(420 * ScaleX, 1500 * ScaleY));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(UIWidthL * ScaleX, 300 * ScaleY), ImVec2(UIWidthL * ScaleX, 1500 * ScaleY));
     ImGui::SetNextWindowPos(ImVec2(10 * ScaleX, 10 * ScaleY + (int)height));
     ImGui::Begin("Noise", 0, ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::Text("Noise Size");
-    ImGui::SetNextItemWidth(300 * ScaleX);
+    ImGui::Text("General Noise Parameters");
+    ImGui::SetNextItemWidth(SliderWidth * ScaleX);
     if (ImGui::SliderInt("Size", &n_resolution, 32, 2048))
     {
         GenerateNoise();
         GenerateTerrainWithNoise();
     }
     HelpMarker("");
-    ImGui::SetNextItemWidth(300 * ScaleX);
+    ImGui::SetNextItemWidth(SliderWidth * ScaleX);
     if (ImGui::SliderFloat("Redistribution", &n_Exponent, 0.01f, 10.0f))
     {
         GenerateTerrainWithNoise();
     }
     HelpMarker("");
-    //if (ImGui::SliderFloat("Height", new float(), 0, 1000))
-    //{
+    ImGui::SetNextItemWidth(SliderWidth * ScaleX);
+    if (ImGui::SliderFloat("Height", &n_height, 1, 1024))
+    {
+        GenerateTerrainWithNoise();
+    }
 
-    //}
-    //if (ImGui::SliderFloat("Floor/Sea Level", new float(), 0, 1000))
-    //{
-
-    //}
-    ImGui::Text("Noise Sliders");
-    ImGui::SetNextItemWidth(300 * ScaleX);
-    if (ImGui::Checkbox("Perlin Noise Enabled", &n_PerlinOn))
+    ImGui::SetNextItemWidth(SliderWidth * ScaleX);
+    if (ImGui::SliderFloat("Floor/Sea Level", &n_floor, 0, 1023))
+    {
+        GenerateTerrainWithNoise();
+    }
+    ImGui::Text("");
+    ImGui::Text("Perlin Noise Parameters");
+    ImGui::SetNextItemWidth(SliderWidth * ScaleX);
+    if (ImGui::Checkbox("P Enabled", &n_PerlinOn))
     {
         GenerateNoise();
         GenerateTerrainWithNoise();
     };
     HelpMarker("");
     if (n_PerlinOn) {
+        ImGui::SetNextItemWidth(SliderWidth * ScaleX);
+        if (ImGui::SliderInt("P Octaves", &n_PerlinOctaves, 1, 5)) {
+            GenerateNoise();
+            GenerateTerrainWithNoise();
+        }
+        HelpMarker("");
         if (ImGui::Button("New P Seed"))
         {
             n_Perlin.SetSeed(RandomSeed());
@@ -1087,39 +1169,49 @@ void NoiseGUI() {
             GenerateTerrainWithNoise();
         }
         HelpMarker("");
-        ImGui::SetNextItemWidth(300 * ScaleX);
+        ImGui::SetNextItemWidth(SliderWidth * ScaleX);
         if (ImGui::SliderFloat("P Intensity", &n_PerlinWeight, 0.01f, 1.0f))
         {
             GenerateNoise();
             GenerateTerrainWithNoise();
         }
         HelpMarker("");
-        ImGui::SetNextItemWidth(300 * ScaleX);
+        ImGui::SetNextItemWidth(SliderWidth * ScaleX);
 
-        if (ImGui::SliderFloat("P Scale", &n_PerlinFrequency, 0.01f, 1.0f))
+        if (ImGui::SliderFloat("P Scale", &n_PerlinFrequency, 0.001f, 0.1f))
         {
-            n_Perlin.SetFrequency(n_PerlinFrequency / 10);
+            n_Perlin.SetFrequency(n_PerlinFrequency);
             GenerateNoise();
             GenerateTerrainWithNoise();
         }
         HelpMarker("");
     }
 
-    if (ImGui::Checkbox("Simplex Noise Enabled", &n_SimplexOn))
+    ImGui::Text("");
+    ImGui::Text("Simplex Noise Parameters");
+    if (ImGui::Checkbox("S Enabled", &n_SimplexOn))
     {
         GenerateNoise();
         GenerateTerrainWithNoise();
     };
     HelpMarker("");
+
     if (n_SimplexOn) {
+        ImGui::SetNextItemWidth(SliderWidth * ScaleX);
+        if (ImGui::SliderInt("S Octaves", &n_SimplexOctaves, 1, 5)) 
+        {
+            GenerateNoise();
+            GenerateTerrainWithNoise();
+        };
+        HelpMarker("");
         if (ImGui::Button("New S Seed"))
         {
-            n_Simplex.SetSeed(RandomSeed());
+            n_Simplex.SetSeed(RandomSeed()); 
             GenerateNoise();
             GenerateTerrainWithNoise();
         }
         HelpMarker("");
-        ImGui::SetNextItemWidth(300 * ScaleX);
+        ImGui::SetNextItemWidth(SliderWidth * ScaleX);
 
         if (ImGui::SliderFloat("S Intensity", &n_SimplexWeight, 0.01f, 1.0f))
         {
@@ -1127,24 +1219,33 @@ void NoiseGUI() {
             GenerateTerrainWithNoise();
         }
         HelpMarker("");
-        ImGui::SetNextItemWidth(300 * ScaleX);
+        ImGui::SetNextItemWidth(SliderWidth * ScaleX);
 
-        if (ImGui::SliderFloat("S Scale", &n_SimplexFrequency, 0.01f, 1.0f))
+        if (ImGui::SliderFloat("S Scale", &n_SimplexFrequency, 0.001f, 0.1f))
         {
-            n_Simplex.SetFrequency(n_SimplexFrequency / 10);
+            n_Simplex.SetFrequency(n_SimplexFrequency);
             GenerateNoise();
             GenerateTerrainWithNoise();
         }
         HelpMarker("");
     }
 
-    if (ImGui::Checkbox("Cellular Noise Enabled", &n_CellularOn))
+    ImGui::Text("");
+    ImGui::Text("Cellular Noise Parameters");
+    if (ImGui::Checkbox("C Enabled", &n_CellularOn))
     {
         GenerateNoise();
         GenerateTerrainWithNoise();
     };
     HelpMarker("");
     if (n_CellularOn) {
+        ImGui::SetNextItemWidth(SliderWidth * ScaleX);
+        if (ImGui::SliderInt("C Octaves", &n_CellularOctaves, 1, 5)) 
+        {
+            GenerateNoise();
+            GenerateTerrainWithNoise();
+        };
+        HelpMarker("");
         if (ImGui::Button("New C Seed"))
         {
             n_Cellular.SetSeed(RandomSeed());
@@ -1152,7 +1253,7 @@ void NoiseGUI() {
             GenerateTerrainWithNoise();
         }
         HelpMarker("");
-        ImGui::SetNextItemWidth(300 * ScaleX);
+        ImGui::SetNextItemWidth(SliderWidth* ScaleX);
 
         if (ImGui::SliderFloat("C Intensity", &n_CellularWeight, 0.01f, 1.0f))
         {
@@ -1160,11 +1261,11 @@ void NoiseGUI() {
             GenerateTerrainWithNoise();
         }
         HelpMarker("");
-        ImGui::SetNextItemWidth(300 * ScaleX);
+        ImGui::SetNextItemWidth(SliderWidth * ScaleX);
 
-        if (ImGui::SliderFloat("C Scale", &n_CellularFrequency, 0.01f, 1.0f))
+        if (ImGui::SliderFloat("C Scale", &n_CellularFrequency, 0.001f, 0.1f))
         {
-            n_Cellular.SetFrequency(n_CellularFrequency / 10);
+            n_Cellular.SetFrequency(n_CellularFrequency);
             GenerateNoise();
             GenerateTerrainWithNoise();
         };
@@ -1177,15 +1278,18 @@ void NoiseGUI() {
     ImGui::End();
 }
 void NoiseImage() {
+    ImGui::SetNextWindowPos(ImVec2((10 + UIWidthL) * ScaleX, 10 * ScaleY + height));
     ImGui::Begin("Noise Image", 0, ImGuiWindowFlags_AlwaysAutoResize);
     HelpMarker("");
-    ImGui::Image((ImTextureID)(intptr_t)n_texture, ImVec2(350 * ScaleX, 350 * ScaleY));
+    ImGui::Image((ImTextureID)(intptr_t)n_texture, ImVec2(150 * ScaleX, 150 * ScaleY));
     ImGui::End();
 }
 void File() {
-    ImGui::SetNextWindowPos(ImVec2(10 * ScaleX + (int)width, 10 * ScaleY));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(UIWidthR * ScaleX, 80 * ScaleY), ImVec2(UIWidthR * ScaleX, 90 * ScaleY));
+    ImGui::SetNextWindowPos(ImVec2(screenWidth - (10 + UIWidthR) * ScaleX, 10 * ScaleY));
     ImGui::Begin("File", 0, ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::InputText("FileName", s_fileName, 32);
+    ImGui::SetNextItemWidth(180);
+    ImGui::InputText("File Name", s_fileName, 32);
     if (ImGui::Button("Export"))
     {
         saveTerrain();
@@ -1194,30 +1298,36 @@ void File() {
     height = ImGui::GetWindowHeight();
     ImGui::End();
 }
-void Debug() {
-    ImGui::SetNextWindowPos(ImVec2(10 * ScaleX + (int)width, 10 * ScaleY + (int)height));
-    ImGui::Begin("Debug", 0, ImGuiWindowFlags_AlwaysAutoResize);
+void View() {
+    ImGui::SetNextWindowSizeConstraints(ImVec2(UIWidthR * ScaleX, 80 * ScaleY), ImVec2(UIWidthR * ScaleX, 600 * ScaleY));
+    ImGui::SetNextWindowPos(ImVec2(screenWidth - (10 + UIWidthR) * ScaleX, 10 * ScaleY + height));
+    ImGui::Begin("View", 0, ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::Text("Camera Position: %.2f, %.2f, %.2f", g_pCamera->GetPosition().x, g_pCamera->GetPosition().y, g_pCamera->GetPosition().z);
+    ImGui::InputFloat("Camera Speed", &movement);
     ImGui::Checkbox("wireFrame", &wireframeEnabled);
-    //if (ImGui::Button("Print Vertices"))
-    //{
-    //   g_GameObject.printVertices();
-    //}
-    //if (ImGui::Button("Print indices"))
-    //{
-    //    g_GameObject.printIndicies();
-    //}
+    height += ImGui::GetWindowHeight();
+    ImGui::End();
+}
+void Brush() {
+    ImGui::SetNextWindowSizeConstraints(ImVec2(UIWidthR * ScaleX, 80 * ScaleY), ImVec2(UIWidthR * ScaleX, 500 * ScaleY));
+    ImGui::SetNextWindowPos(ImVec2(screenWidth - (10 + UIWidthR) * ScaleX, 10 * ScaleY + height));
+    ImGui::Begin("Terrain Brush", 0, ImGuiWindowFlags_AlwaysAutoResize);
+    ImGui::Text("Camera Position: %.2f, %.2f, %.2f", g_pCamera->GetPosition().x, g_pCamera->GetPosition().y, g_pCamera->GetPosition().z);
+    ImGui::Checkbox("Flatten Brush", &b_FlatBool);
+    ImGui::InputInt("Flatten Size", &b_FlatSize);
+    ImGui::InputFloat("Max Flatten Difference", &b_MaxFlatDifference);
     ImGui::End();
 }
 
 
 void RenderDebugWindow(float deltaTime) {
     DSGUI();
-    HydroErosionGUI();
     NoiseGUI();
+    HydroErosionGUI();
     NoiseImage();
     File();
-    Debug();
+    View();
+    Brush();
 }
 
 //--------------------------------------------------------------------------------------
@@ -1231,6 +1341,7 @@ void Render()
 
 
     if (normalDraw && !wireframeEnabled) {
+        if (rasterizerState) { rasterizerState->Release(); rasterizerState = nullptr; }
         D3D11_RASTERIZER_DESC rasterizerDesc = {};
         rasterizerDesc.FillMode = D3D11_FILL_SOLID;
         rasterizerDesc.CullMode = D3D11_CULL_BACK;
@@ -1247,6 +1358,7 @@ void Render()
     }
 
     if (wireDraw && wireframeEnabled) {
+        if (rasterizerState) { rasterizerState->Release(); rasterizerState = nullptr; }
         D3D11_RASTERIZER_DESC rasterizerDesc = {};
         rasterizerDesc.FillMode = D3D11_FILL_WIREFRAME;
         rasterizerDesc.CullMode = D3D11_CULL_NONE;
@@ -1263,11 +1375,6 @@ void Render()
     }
 
     // Start the Dear ImGui frame
-
-    RECT desktop;
-    GetWindowRect(GetDesktopWindow(), &desktop);
-    int screenWidth = desktop.right;
-    int screenHeight = desktop.bottom;
     ScaleX = (float)screenWidth / 1920.0f;
     ScaleY = (float)screenHeight / 1080.0f;
 

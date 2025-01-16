@@ -10,13 +10,6 @@ using namespace DirectX;
 class HydraulicErosion
 {
 private:
-    double scale = 60.0;
-    float dt = 1.2f;
-    float density = 1.0f;
-    float evapRate = 0.001f;
-    float depositionRate = 0.1f;
-    float minVol = 0.01f;
-    float friction = 0.05f;
     XMFLOAT2 dim;
     std::vector<std::vector<float>> erosionMap;
 
@@ -53,6 +46,13 @@ private:
         float sediment = 0.0f;
     };
 public:
+    double scale = 60.0;
+    float dt = 1.2f;
+    float density = 1.0f;
+    float evapRate = 0.001f;
+    float depositionRate = 0.1f;
+    float minVol = 0.01f;
+    float friction = 0.05f;
     HydraulicErosion() {};
     std::vector<std::vector<float>> Erode(std::vector<std::vector<float>> erosionmap, int _hydroCycles, int size)
     {
