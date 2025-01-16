@@ -1035,7 +1035,7 @@ void GenerateTerrainWithNoise()
 
             float normalizedColour = (colour / maxWeightSum) * 0.5f + 0.5f;
             float temp = pow(normalizedColour, n_Exponent);
-            temp = (normalizedColour * n_height);
+            temp = (temp * n_height);
             temp = max(n_floor, min(n_height, temp));
             map[x][y] = temp;
         }
