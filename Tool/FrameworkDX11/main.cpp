@@ -344,7 +344,7 @@ void GenerateNoiseImageAndTerrain(bool Image, bool Terrain)
     memset(n_pixels, 0, sizeof(uint32_t) * n_resolution * n_resolution);
     std::vector<std::vector<float>> map(n_resolution, std::vector<float>(n_resolution));
 
-    int numThreads = std::thread::hardware_concurrency();
+    int numThreads = std::thread::hardware_concurrency()/4;
     int chunkSize = n_resolution / numThreads;
 
     float maxWeightSum = (n_PerlinOn * n_PerlinWeight) +
@@ -404,6 +404,7 @@ void GenerateNoiseImageAndTerrain(bool Image, bool Terrain)
         srvd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
         srvd.Texture2D.MipLevels = 1;
 
+        if (n_texture) { n_texture->Release(); }
         hr = g_pd3dDevice->CreateShaderResourceView(texture, &srvd, &n_texture);
         if (FAILED(hr)) {
             texture->Release();
@@ -807,7 +808,7 @@ void CleanupDevice()
     if (g_pd3dDevice) g_pd3dDevice->Release();
 
     // handy for finding dx memory leaks
-    //debugDevice->ReportLiveDeviceObjects(D3D11_RLDO_DETAIL); // add back later for debugging
+    debugDevice->ReportLiveDeviceObjects(D3D11_RLDO_DETAIL); // add back later for debugging
 
     if (debugDevice)
         debugDevice->Release();
@@ -861,11 +862,9 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
 
     case WM_MOUSEWHEEL:
     {
-        // Scroll direction
         int delta = GET_WHEEL_DELTA_WPARAM(wParam);
-        float zoomFactor = 0.1f; // Adjust sensitivity
+        float zoomFactor = 0.1f;
 
-        // Zoom in/out
         g_pCamera->Zoom(-delta * zoomFactor);
         break;
     }
@@ -886,10 +885,8 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
     {
         static bool isFirstClick = true;
         if (mouseDownL) {
-             // Track if it's the first click
-            static POINTS lastMousePos = {}; // Persist last mouse position across frames
+            static POINTS lastMousePos = {};
             if (isFirstClick) {
-                // Initialize lastMousePos on the first click
                 lastMousePos = MAKEPOINTS(lParam);
                 isFirstClick = false;
             }
@@ -897,38 +894,28 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
             {
                 POINTS mousePos = MAKEPOINTS(lParam);
 
-                // Calculate the delta of the mouse movement
                 POINTS delta = { mousePos.x - lastMousePos.x, mousePos.y - lastMousePos.y };
 
-                // Define a sensitivity for the movement
-
-                // Load camera position and target position
                 XMFLOAT3 cameraPos = g_pCamera->GetPosition();
                 XMFLOAT3 targetPos = g_pCamera->GetTarget();
 
-                // Compute the direction vector from the camera to the target
                 XMVECTOR camPosVec = XMLoadFloat3(&cameraPos);
                 XMVECTOR targetPosVec = XMLoadFloat3(&targetPos);
-                XMVECTOR viewDirection = XMVector3Normalize(targetPosVec - camPosVec); // Forward direction
+                XMVECTOR viewDirection = XMVector3Normalize(targetPosVec - camPosVec);
 
-                // Calculate the right and up vectors relative to the view direction
-                XMVECTOR upVec = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f); // World up vector
-                XMVECTOR rightVec = XMVector3Normalize(XMVector3Cross(upVec, viewDirection)); // Right direction
-                upVec = XMVector3Normalize(XMVector3Cross(viewDirection, rightVec)); // Adjusted up direction
+                XMVECTOR upVec = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f); 
+                XMVECTOR rightVec = XMVector3Normalize(XMVector3Cross(upVec, viewDirection)); 
+                upVec = XMVector3Normalize(XMVector3Cross(viewDirection, rightVec)); 
 
-                // Scale movement by sensitivity and delta
                 XMVECTOR deltaMovement = XMVectorAdd(
-                    XMVectorScale(rightVec, -delta.x * c_sensitivity), // Left-right movement
-                    XMVectorScale(upVec, delta.y * c_sensitivity)    // Up-down movement (inverted to match screen coordinates)
+                    XMVectorScale(rightVec, -delta.x * c_sensitivity), 
+                    XMVectorScale(upVec, delta.y * c_sensitivity)   
                 );
 
-                // Get the current target and update its position
                 XMVECTOR newTargetVec = targetPosVec + deltaMovement;
 
-                // Compute the delta for the camera as well (to keep look direction constant)
                 XMVECTOR targetDelta = newTargetVec - targetPosVec;
 
-                // Update the target and camera positions
                 XMFLOAT3 newTargetPos;
                 XMStoreFloat3(&newTargetPos, newTargetVec);
 
@@ -939,10 +926,9 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
                     XMVectorGetZ(targetDelta)
                 ));
 
-                // Save the last mouse position for the next frame
                 lastMousePos = mousePos;
 
-                break; // Exit the loop after processing the input
+                break;
             }
             XMFLOAT3 cameraPosition = g_pCamera->GetPosition();
             XMVECTOR rayOrigin = XMLoadFloat3(&cameraPosition);
@@ -980,35 +966,27 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
         else { isFirstClick = true; }
         if (mouseDownR)
         {
-            // Get the dimensions of the window
             RECT rect;
             GetClientRect(hWnd, &rect);
 
-            // Calculate the center position of the window
             POINT windowCenter;
             windowCenter.x = (rect.right - rect.left) / 2;
             windowCenter.y = (rect.bottom - rect.top) / 2;
 
-            // Convert the client area point to screen coordinates
             ClientToScreen(hWnd, &windowCenter);
 
-            // Get the current cursor position
             POINTS mousePos = MAKEPOINTS(lParam);
             POINT cursorPos = { mousePos.x, mousePos.y };
             ClientToScreen(hWnd, &cursorPos);
 
-            // Calculate the delta from the window center
             POINT delta;
             delta.x = cursorPos.x - windowCenter.x;
             delta.y = -(cursorPos.y - windowCenter.y);
 
-            // Sensitivity factor
             const float sensitivity = 0.001f;
 
-            // Update the camera with the delta
             g_pCamera->Rotate(delta.x * sensitivity, -delta.y * sensitivity);
 
-            // Recenter the cursor
             SetCursorPos(windowCenter.x, windowCenter.y);
         }
         break;
@@ -1355,6 +1333,8 @@ void View() {
     ImGui::Begin("View", 0, ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::Text("Camera Position: %.2f, %.2f, %.2f", g_pCamera->GetPosition().x, g_pCamera->GetPosition().y, g_pCamera->GetPosition().z);
     ImGui::Text("Camera Rotation Point: %.2f, %.2f, %.2f", g_pCamera->GetTarget().x, g_pCamera->GetTarget().y, g_pCamera->GetTarget().z);
+    ImGui::Text("Face Count: %i", g_GameObject.GetIndexCount() / 3);
+    ImGui::Text("Vertex Count: %i", g_GameObject.GetVertexCount() / 3);
     ImGui::SliderFloat("CTRL+LCLICK Sens", &c_sensitivity, 0.05, 1.0f);
     ImGui::Checkbox("wireFrame", &wireframeEnabled);
     height += ImGui::GetWindowHeight();

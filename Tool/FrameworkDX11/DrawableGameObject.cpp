@@ -127,6 +127,7 @@ HRESULT DrawableGameObject::initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceConte
 	m_verticesArray = new SimpleVertex[vertexCount];
 	m_indicesArray = new DWORD[indexCount];
 	m_IndexCount = indexCount;
+	m_VertexCount = vertexCount;
 	int count = 0;
 	for (int x = 0; x < m_size; x++)
 	{
@@ -267,7 +268,7 @@ HRESULT DrawableGameObject::initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceConte
 
 
 	bd.Usage = D3D11_USAGE_DEFAULT;
-	bd.ByteWidth = sizeof(DWORD) * indexCount;        // 36 vertices needed for 12 triangles in a triangle list
+	bd.ByteWidth = sizeof(DWORD) * indexCount;
 	bd.BindFlags = D3D11_BIND_INDEX_BUFFER;
 	bd.CPUAccessFlags = 0;
 	InitData.pSysMem = m_indicesArray;
