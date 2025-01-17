@@ -34,7 +34,7 @@ public:
 
     void Zoom(float deltaDistance)
     {
-        distance = max(1.0f, distance + deltaDistance);
+        distance += deltaDistance;
         UpdatePosition();
     }
 
