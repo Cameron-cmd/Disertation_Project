@@ -127,6 +127,7 @@ HRESULT DrawableGameObject::initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceConte
 	m_verticesArray = new SimpleVertex[vertexCount];
 	m_indicesArray = new DWORD[indexCount];
 	m_IndexCount = indexCount;
+	m_VertexCount = vertexCount;
 	int count = 0;
 	for (int x = 0; x < m_size; x++)
 	{

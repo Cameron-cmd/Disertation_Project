@@ -73,6 +73,7 @@ public:
     }
 
     XMFLOAT3 GetLookDir() { return lookDir; }
+    void SetDistance(float distanceIn) { distance = distanceIn; UpdatePosition(); }
 private:
 
     void UpdateLookDir()

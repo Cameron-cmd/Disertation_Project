@@ -57,6 +57,7 @@ public:
 	DWORD*								GetIndices() { return m_indicesArray; }
 	INT									GetSize() { return m_size; }
 	INT									GetIndexCount() { return m_IndexCount; }
+	INT									GetVertexCount() { return m_VertexCount; }
 	float GetHeight(int x, int y) { return m_map[x][y]; }
 	void SetHeight(int x, int y, float z) { m_map[x][y] = z; }
 	HydraulicErosion					hydraulicErosionClass;
@@ -72,6 +73,7 @@ private:
 	ID3D11Buffer*						m_pMaterialConstantBuffer = nullptr;
 	XMFLOAT3							m_position;
 	INT									m_IndexCount = 0;
+	INT									m_VertexCount = 0;
 
 	SimpleVertex*						m_verticesArray;
 	DWORD*								m_indicesArray;
