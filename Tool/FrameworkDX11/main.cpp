@@ -376,12 +376,14 @@ void GenerateNoiseImageAndTerrain(bool Image, bool Terrain)
         g_pCamera->SetTarget(XMFLOAT3(n_resolution / 2, n_height / 2, n_resolution / 2));
         g_GameObject.noiseGenerateTerrain(&map, n_resolution);
         g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
-        map.clear();
-        map.shrink_to_fit();
     }
 
 
     if (Image) {
+        if (n_texture) {
+            n_texture->Release();
+            n_texture = nullptr;
+        }
         D3D11_SUBRESOURCE_DATA subrecData = {};
         subrecData.pSysMem = n_pixels;
         subrecData.SysMemPitch = n_resolution * sizeof(uint32_t);
@@ -412,12 +414,14 @@ void GenerateNoiseImageAndTerrain(bool Image, bool Terrain)
             texture->Release();
             return;
         }
-
         texture->Release();
         texture = nullptr;
-        delete[] n_pixels;
-        n_pixels = nullptr;
     }
+    delete[] n_pixels;
+    n_pixels = nullptr;
+
+    map.clear();
+    map.shrink_to_fit();
 }
 
 //--------------------------------------------------------------------------------------
@@ -1447,8 +1451,8 @@ void Brush() {
     ImGui::InputFloat("Max Height Diff", &b_MaxFlatDifference);
     HelpMarker("The maximum difference in the picked height and the surrounding height that will get flattened");
     ImGui::SetNextItemWidth(120);
-    ImGui::SliderFloat("smoothnessFactor", &b_smoothnessFactor, 0.0f, 1.0f);
-    HelpMarker("adds some variance to smoothness so its not completely flat immediately");
+    ImGui::SliderFloat("Smoothness", &b_smoothnessFactor, 0.0f, 1.0f);
+    HelpMarker("adds some variance to flatten so its not completely flat. 1 is completely flat");
 
     ImGui::End();
 }
