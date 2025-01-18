@@ -140,10 +140,12 @@ bool advHydro = false;
 float movement = 50.0f;
 
 bool b_FlatBool = false;
-int b_FlatSize = 2;
-float b_MaxFlatDifference = 2.0f;
+int b_FlatSize = 5;
+float b_MaxFlatDifference = 5.0f;
+float b_smoothnessFactor = 0.5f;
 
 float c_sensitivity = 1.0f;
+float c_zoomSens = 0.35f;
 //--------------------------------------------------------------------------------------
 // Entry point to the program. Initializes everything and goes into a message processing 
 // loop. Idle time is used to render the scene.
@@ -750,6 +752,9 @@ HRESULT		InitWorld(int width, int height)
 {
     float val = (pow(2, t_detail) + 1) /2;
     g_pCamera = new Camera(XMFLOAT3(val, val, val), val, XMFLOAT3(0.0f, 1.0f, 0.0f));
+    int temp = pow(2, t_detail) / 2;
+    g_pCamera->SetTarget(XMFLOAT3(temp, temp, temp));
+    g_pCamera->SetDistance(temp * 5);
 
 	// Initialize the projection matrix
     constexpr float fovAngleY = XMConvertToRadians(60.0f);
@@ -844,6 +849,14 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
     static bool mouseDownR = false;
     static bool mouseDownL = false;
 
+    RECT rect;
+    GetClientRect(hWnd, &rect);
+
+    // Calculate the center position of the window
+    POINT windowCenter;
+    windowCenter.x = (rect.right - rect.left) / 2;
+    windowCenter.y = (rect.bottom - rect.top) / 2;
+
     extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
     if (ImGui_ImplWin32_WndProcHandler(hWnd, message, wParam, lParam))
         return true;
@@ -864,22 +877,93 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
     {
         // Scroll direction
         int delta = GET_WHEEL_DELTA_WPARAM(wParam);
-        float zoomFactor = 0.1f; // Adjust sensitivity
 
         // Zoom in/out
-        g_pCamera->Zoom(-delta * zoomFactor);
+        g_pCamera->Zoom(-delta * c_zoomSens);
         break;
     }
     case WM_RBUTTONDOWN:
+    {
         mouseDownR = true;
+        SetCursorPos(windowCenter.x, windowCenter.y);
         break;
+    }
     case WM_RBUTTONUP:
         mouseDownR = false;
         break;
     case WM_LBUTTONDOWN:
+    {
         mouseDownL = true;
+        if (b_FlatBool && !(GetAsyncKeyState(VK_CONTROL) & 0x8000))
+        {
+            XMFLOAT3 cameraPosition = g_pCamera->GetPosition();
+            XMVECTOR rayOrigin = XMLoadFloat3(&cameraPosition);
+            POINTS mousePos = MAKEPOINTS(lParam);
+            XMFLOAT2 temp = XMFLOAT2(mousePos.x, mousePos.y);
+            XMVECTOR cursorPos = XMLoadFloat2(&temp);
+            XMMATRIX mGO = XMLoadFloat4x4(g_GameObject.getTransform());
+            XMMATRIX World = XMMatrixTranspose(mGO);
+            RECT rect;
+            GetClientRect(hWnd, &rect);
+            float viewportWidth = (float)(rect.right - rect.left);
+            float viewportHeight = (float)(rect.bottom - rect.top);
+            XMVECTOR rayDirection = XMVector3Normalize(XMVector3Unproject(cursorPos, 0, 0,
+                (viewportWidth), (viewportHeight),
+                0.0f, 1.0f, g_Projection, g_pCamera->GetViewMatrix(), World) - rayOrigin);
 
+            float stepSize = 0.5f;
+            float currentDistance = 0.0f;
+            int maxDistance = 5000;
+            XMVECTOR Position = rayOrigin;
+
+            while (currentDistance < maxDistance)
+            {
+                float x = XMVectorGetX(Position);
+                float z = XMVectorGetZ(Position);
+                float size = g_GameObject.GetSize();
+
+                if (x <= size && x >= 0 && z <= size && z >= 0) {
+                    // Find the height of the picked vertex
+                    int pickedX = (int)x;
+                    int pickedZ = (int)z;
+                    float pickedHeight = g_GameObject.GetHeight(pickedX, pickedZ);
+
+                    if (abs(XMVectorGetY(Position) - pickedHeight) <= 2)
+                    {
+                        // Iterate over the circle's bounding box
+                        for (int dx = -b_FlatSize; dx <= b_FlatSize; dx++) {
+                            for (int dz = -b_FlatSize; dz <= b_FlatSize; dz++) {
+                                int nx = pickedX + dx;
+                                int nz = pickedZ + dz;
+
+                                // Check bounds
+                                if (nx >= 0 && nx < size && nz >= 0 && nz < size) {
+                                    // Check if the point is within the circle
+                                    if (dx * dx + dz * dz <= b_FlatSize * b_FlatSize) {
+                                        if (abs(pickedHeight - g_GameObject.GetHeight(nx, nz)) <= b_MaxFlatDifference)
+                                        {
+                                            float currentHeight = g_GameObject.GetHeight(nx, nz); 
+                                            float newHeight = (1.0f - b_smoothnessFactor) * currentHeight +
+                                                b_smoothnessFactor * pickedHeight;
+
+                                            g_GameObject.SetHeight(nx, nz, newHeight);
+                                        }
+                                        
+                                    }
+                                }
+                            }
+                        }
+                        g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
+                        break;
+                    }
+                }
+
+                Position += rayDirection * stepSize;
+                currentDistance += stepSize;
+            }
+        }
         break;
+    }
     case WM_LBUTTONUP:
         mouseDownL = false;
         break;
@@ -945,111 +1029,10 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
 
                 break; // Exit the loop after processing the input
             }
-            if (b_FlatBool)
-            {
-                XMFLOAT3 cameraPosition = g_pCamera->GetPosition();
-                XMVECTOR rayOrigin = XMLoadFloat3(&cameraPosition);
-                POINTS mousePos = MAKEPOINTS(lParam);
-                XMFLOAT2 temp = XMFLOAT2(mousePos.x, mousePos.y);
-                XMVECTOR cursorPos = XMLoadFloat2(&temp);
-                RECT rect;
-                GetClientRect(hWnd, &rect);
-                XMMATRIX mGO = XMLoadFloat4x4(g_GameObject.getTransform());
-                XMMATRIX World = XMMatrixTranspose(mGO);
-                XMVECTOR rayDirection = XMVector3Normalize(XMVector3Unproject(cursorPos, 0, 0,
-                    (rect.right - rect.left), (rect.bottom - rect.top),
-                    0.0f, 1.0f, g_Projection, g_pCamera->GetViewMatrix(), World) - rayOrigin);
-
-                float stepSize = 0.5f;
-                float currentDistance = 0.0f;
-                int maxDistance = 5000;
-                XMVECTOR Position = rayOrigin;
-
-                // Initial Narrow Radius (0.8 of brush size)
-                float narrowRadius = 2.0;
-
-                while (currentDistance < maxDistance)
-                {
-                    float x = XMVectorGetX(Position);
-                    float y = XMVectorGetY(Position);
-                    float z = XMVectorGetZ(Position);
-                    float size = g_GameObject.GetSize();
-
-                    if (x <= size && x >= 0 && z <= size && z >= 0)
-                    {
-                        int centerX = static_cast<int>(x);
-                        int centerZ = static_cast<int>(z);
-
-                        // Narrow radius bounds
-                        int startX = max(0, centerX - static_cast<int>(narrowRadius));
-                        int endX = min(static_cast<int>(size) - 1, centerX + static_cast<int>(narrowRadius));
-                        int startZ = max(0, centerZ - static_cast<int>(narrowRadius));
-                        int endZ = min(static_cast<int>(size) - 1, centerZ + static_cast<int>(narrowRadius));
-
-                        bool found = false;
-
-                        // Initial Narrow Check
-                        for (int vx = startX; vx <= endX; vx++) {
-                            for (int vz = startZ; vz <= endZ; vz++) {
-                                float dx = vx - centerX;
-                                float dz = vz - centerZ;
-
-                                if (dx * dx + dz * dz <= narrowRadius * narrowRadius) {
-                                    float vertexHeight = g_GameObject.GetHeight(vx, vz);
-                                    if (y - vertexHeight < b_MaxFlatDifference) {
-                                        found = true;
-                                        break;
-                                    }
-                                }
-                            }
-                            if (found) break;
-                        }
-
-                        // Apply full brush size if a point is found
-                        if (found)
-                        {
-                            startX = max(0, centerX - static_cast<int>(b_FlatSize));
-                            endX = min(static_cast<int>(size) - 1, centerX + static_cast<int>(b_FlatSize));
-                            startZ = max(0, centerZ - static_cast<int>(b_FlatSize));
-                            endZ = min(static_cast<int>(size) - 1, centerZ + static_cast<int>(b_FlatSize));
-
-                            for (int vx = startX; vx <= endX; vx++) {
-                                for (int vz = startZ; vz <= endZ; vz++) {
-                                    float dx = vx - centerX;
-                                    float dz = vz - centerZ;
-
-                                    if (dx * dx + dz * dz <= b_FlatSize * b_FlatSize) {
-                                        float vertexHeight = g_GameObject.GetHeight(vx, vz);
-                                        if (0 < vertexHeight - y && vertexHeight - y < b_MaxFlatDifference) {
-                                            float smoothingFactor = 0.5f;
-                                            float newHeight = y;
-                                            g_GameObject.SetHeight(vx, vz, newHeight);
-                                        }
-                                    }
-                                }
-                            }
-
-                            g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
-                            break;
-                        }
-                    }
-
-                    Position += rayDirection * stepSize;
-                    currentDistance += stepSize;
-                }
-            }
         }
         else { isFirstClick = true; }
         if (mouseDownR)
         {
-            // Get the dimensions of the window
-            RECT rect;
-            GetClientRect(hWnd, &rect);
-
-            // Calculate the center position of the window
-            POINT windowCenter;
-            windowCenter.x = (rect.right - rect.left) / 2;
-            windowCenter.y = (rect.bottom - rect.top) / 2;
 
             // Convert the client area point to screen coordinates
             ClientToScreen(hWnd, &windowCenter);
@@ -1203,7 +1186,7 @@ void DSGUI() {
         g_GameObject.setDetailRoughness(t_detail, t_roughness);
         float temp = (pow(2, t_detail) + 1) / 2;
         g_pCamera->SetTarget(XMFLOAT3(temp, temp, temp));
-        g_pCamera->SetDistance(temp * 10);
+        g_pCamera->SetDistance(temp * 5);
         g_GameObject.generateTerrain();
         g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
     }
@@ -1281,8 +1264,9 @@ void NoiseGUI() {
         GenerateNoiseImageAndTerrain(FALSE, TRUE);
 
     }
-    ImGui::Text("The lowest height value the terrain model can go");
-    ImGui::Text("Perlin Noise Parameters");
+    HelpMarker("The lowest height value the terrain model can go");
+    ImGui::Text("\nNoise Specific Options");
+    ImGui::Text("\nPerlin Noise Parameters");
     ImGui::SetNextItemWidth(SliderWidth * ScaleX);
     if (ImGui::Checkbox("P Enabled", &n_PerlinOn))
     {
@@ -1403,6 +1387,7 @@ void NoiseImage() {
     ImGui::SetNextWindowPos(ImVec2((10 + UIWidthL) * ScaleX, 10 * ScaleY + height));
     ImGui::Begin("Noise Image", 0, ImGuiWindowFlags_AlwaysAutoResize);
     HelpMarker("Noise represented as a height map");
+    ImGui::SetNextItemWidth(50);
     ImGui::SliderInt("Image Size", &n_imageSize, 50, 500);
     ImGui::Image((ImTextureID)(intptr_t)n_texture, ImVec2(n_imageSize * ScaleX, n_imageSize * ScaleY));
     ImGui::End();
@@ -1419,21 +1404,32 @@ void File() {
     }
     HelpMarker("Exports the file in the programs file location");
     height = ImGui::GetWindowHeight();
+    width = ImGui::GetWindowWidth();
+    ImGui::End();
+}
+
+void Intro() {
+    ImGui::SetNextWindowSizeConstraints(ImVec2((UIWidthR + 30) * ScaleX, 80 * ScaleY), ImVec2((UIWidthR+30) * ScaleX, 400 * ScaleY));
+    ImGui::SetNextWindowPos(ImVec2(screenWidth - (10 + UIWidthR + UIWidthR + 30) * ScaleX, 10 * ScaleY));
+    ImGui::Begin("Information", 0, ImGuiWindowFlags_AlwaysAutoResize);
+    ImGui::TextWrapped("This is a terrain generation tool.The two terrain generation modes Diamond Square and noise do not currently work together.\n\nCamera movement, right click will rotate the camera around the centre point, and press Control + Left Click to move the rotation point. And to zoom in and out you use the scroll wheel.\n\nTo directly edit slider values you can Control + Left Click on the sliders to access the value entry mode \n\nClick the arrow at the top of this window to minimize this text.");
     ImGui::End();
 }
 void View() {
     ImGui::SetNextWindowSizeConstraints(ImVec2(UIWidthR * ScaleX, 80 * ScaleY), ImVec2(UIWidthR * ScaleX, 600 * ScaleY));
     ImGui::SetNextWindowPos(ImVec2(screenWidth - (10 + UIWidthR) * ScaleX, 10 * ScaleY + height));
     ImGui::Begin("View", 0, ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::Text("Camera");
+    ImGui::Text("Camera:");
     ImGui::Text("Position: %.2f, %.2f, %.2f", g_pCamera->GetPosition().x, g_pCamera->GetPosition().y, g_pCamera->GetPosition().z);
     ImGui::Text("Rotation Point: %.2f, %.2f, %.2f", g_pCamera->GetTarget().x, g_pCamera->GetTarget().y, g_pCamera->GetTarget().z);
     ImGui::SetNextItemWidth(150);
     ImGui::SliderFloat("CTRL+LCLICK Sens", &c_sensitivity, 0.05, 1.0f);
-    ImGui::Text("Model Data");
+    ImGui::SetNextItemWidth(150);
+    ImGui::SliderFloat("Zoom Sens", &c_zoomSens, 0.01, 1.0);
+    ImGui::Text("Model Data:");
     ImGui::Text("Vertex Count: %i", g_GameObject.GetVertexCount());
     ImGui::Text("Face Count: %i", g_GameObject.GetIndexCount()/3);
-    ImGui::Text("View");
+    ImGui::Text("View:");
     ImGui::Checkbox("wireFrame", &wireframeEnabled);
     height += ImGui::GetWindowHeight();
     ImGui::End();
@@ -1444,9 +1440,16 @@ void Brush() {
     ImGui::Begin("Terrain Brush", 0, ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::Checkbox("Flatten Brush Enabled", &b_FlatBool);
     HelpMarker("Enables the flatten brush so it flattens on left click");
+    ImGui::SetNextItemWidth(120);
     ImGui::InputInt("Flatten Size", &b_FlatSize);
     HelpMarker("changes the size of the brush so the bigger the bigger the area it flattens");
-    ImGui::InputFloat("Max Flatten Difference", &b_MaxFlatDifference);
+    ImGui::SetNextItemWidth(120);
+    ImGui::InputFloat("Max Height Diff", &b_MaxFlatDifference);
+    HelpMarker("The maximum difference in the picked height and the surrounding height that will get flattened");
+    ImGui::SetNextItemWidth(120);
+    ImGui::SliderFloat("smoothnessFactor", &b_smoothnessFactor, 0.0f, 1.0f);
+    HelpMarker("adds some variance to smoothness so its not completely flat immediately");
+
     ImGui::End();
 }
 
@@ -1457,6 +1460,7 @@ void RenderDebugWindow(float deltaTime) {
     HydroErosionGUI();
     NoiseImage();
     File();
+    Intro();
     View();
     Brush();
 }
