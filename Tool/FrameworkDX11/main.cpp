@@ -842,6 +842,103 @@ void CenterMouseInWindow(HWND hWnd)
     SetCursorPos(center.x, center.y);
 }
 
+struct brushReturn {
+    DirectX::XMVECTOR StructPositon;
+    XMFLOAT3 StructPickedPosition;
+
+    brushReturn(DirectX::XMVECTOR Pos, XMFLOAT3 F3) { StructPositon = Pos; StructPickedPosition = F3; }
+};
+
+brushReturn RaycastBrush(HWND hWnd, WPARAM lParam)
+{
+    XMFLOAT3 cameraPosition = g_pCamera->GetPosition();
+    XMVECTOR rayOrigin = XMLoadFloat3(&cameraPosition);
+    POINTS mousePos = MAKEPOINTS(lParam);
+    XMFLOAT2 temp = XMFLOAT2(mousePos.x, mousePos.y);
+    XMVECTOR cursorPos = XMLoadFloat2(&temp);
+    XMMATRIX mGO = XMLoadFloat4x4(g_GameObject.getTransform());
+    XMMATRIX World = XMMatrixTranspose(mGO);
+    RECT rect;
+    GetClientRect(hWnd, &rect);
+    float viewportWidth = (float)(rect.right - rect.left);
+    float viewportHeight = (float)(rect.bottom - rect.top);
+    XMVECTOR rayDirection = XMVector3Normalize(XMVector3Unproject(cursorPos, 0, 0,
+        (viewportWidth), (viewportHeight),
+        0.0f, 1.0f, g_Projection, g_pCamera->GetViewMatrix(), World) - rayOrigin);
+
+    float stepSize = 0.5f;
+    float currentDistance = 0.0f;
+    int maxDistance = 5000;
+    XMVECTOR Position = rayOrigin;
+
+    while (currentDistance < maxDistance)
+    {
+        float x = XMVectorGetX(Position);
+        float z = XMVectorGetZ(Position);
+        float size = g_GameObject.GetSize()-1;
+
+        if (x <= size && x >= 0 && z <= size && z >= 0) {
+            // Find the height of the picked vertex
+            int pickedX = (int)x;
+            int pickedZ = (int)z;
+            float pickedHeight = g_GameObject.GetHeight(pickedX, pickedZ);
+            if (abs(XMVectorGetY(Position) - pickedHeight) <= 2)
+            {
+                return brushReturn(Position, XMFLOAT3(pickedX, pickedHeight, pickedZ));
+            }
+        }
+        Position += rayDirection * stepSize;
+        currentDistance += stepSize;
+    }
+    return brushReturn(Position, XMFLOAT3(-1, -1, -1));
+}
+
+void FlattenBrush(HWND hWnd, WPARAM lParam, bool held)
+{
+    brushReturn info = RaycastBrush(hWnd, lParam);
+    XMVECTOR Position = info.StructPositon;
+    XMFLOAT3 F3 = info.StructPickedPosition;
+    int pickedX = F3.x;
+    int pickedZ = F3.z;
+    float pickedHeight = F3.y;
+    float size = g_GameObject.GetSize();
+    // Iterate over the circle's bounding box
+    for (int dx = -b_FlatSize; dx <= b_FlatSize; dx++) {
+        for (int dz = -b_FlatSize; dz <= b_FlatSize; dz++) {
+            int nx = pickedX + dx;
+            int nz = pickedZ + dz;
+
+            // Check bounds
+            if (nx >= 0 && nx < size && nz >= 0 && nz < size) {
+                // Check if the point is within the circle
+                if (dx * dx + dz * dz <= b_FlatSize * b_FlatSize) {
+                    if (abs(pickedHeight - g_GameObject.GetHeight(nx, nz)) <= b_MaxFlatDifference)
+                    {
+                        float currentHeight = g_GameObject.GetHeight(nx, nz);
+                        float newHeight = (1.0f - b_smoothnessFactor) * currentHeight +
+                            b_smoothnessFactor * pickedHeight;
+
+                        g_GameObject.SetHeight(nx, nz, newHeight);
+                    }
+
+                }
+            }
+        }
+    }
+    if (held)
+    {
+        static int frame = 0;
+        if (frame % 3 == 0)
+        {
+            g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
+        }
+        frame++;
+    }
+    else {
+        g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
+    }
+}
+
 //--------------------------------------------------------------------------------------
 // Called every time the application receives a message
 //--------------------------------------------------------------------------------------
@@ -900,71 +997,7 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
         mouseDownL = true;
         if (b_FlatBool && !(GetAsyncKeyState(VK_CONTROL) & 0x8000))
         {
-            XMFLOAT3 cameraPosition = g_pCamera->GetPosition();
-            XMVECTOR rayOrigin = XMLoadFloat3(&cameraPosition);
-            POINTS mousePos = MAKEPOINTS(lParam);
-            XMFLOAT2 temp = XMFLOAT2(mousePos.x, mousePos.y);
-            XMVECTOR cursorPos = XMLoadFloat2(&temp);
-            XMMATRIX mGO = XMLoadFloat4x4(g_GameObject.getTransform());
-            XMMATRIX World = XMMatrixTranspose(mGO);
-            RECT rect;
-            GetClientRect(hWnd, &rect);
-            float viewportWidth = (float)(rect.right - rect.left);
-            float viewportHeight = (float)(rect.bottom - rect.top);
-            XMVECTOR rayDirection = XMVector3Normalize(XMVector3Unproject(cursorPos, 0, 0,
-                (viewportWidth), (viewportHeight),
-                0.0f, 1.0f, g_Projection, g_pCamera->GetViewMatrix(), World) - rayOrigin);
-
-            float stepSize = 0.5f;
-            float currentDistance = 0.0f;
-            int maxDistance = 5000;
-            XMVECTOR Position = rayOrigin;
-
-            while (currentDistance < maxDistance)
-            {
-                float x = XMVectorGetX(Position);
-                float z = XMVectorGetZ(Position);
-                float size = g_GameObject.GetSize();
-
-                if (x <= size && x >= 0 && z <= size && z >= 0) {
-                    // Find the height of the picked vertex
-                    int pickedX = (int)x;
-                    int pickedZ = (int)z;
-                    float pickedHeight = g_GameObject.GetHeight(pickedX, pickedZ);
-
-                    if (abs(XMVectorGetY(Position) - pickedHeight) <= 2)
-                    {
-                        // Iterate over the circle's bounding box
-                        for (int dx = -b_FlatSize; dx <= b_FlatSize; dx++) {
-                            for (int dz = -b_FlatSize; dz <= b_FlatSize; dz++) {
-                                int nx = pickedX + dx;
-                                int nz = pickedZ + dz;
-
-                                // Check bounds
-                                if (nx >= 0 && nx < size && nz >= 0 && nz < size) {
-                                    // Check if the point is within the circle
-                                    if (dx * dx + dz * dz <= b_FlatSize * b_FlatSize) {
-                                        if (abs(pickedHeight - g_GameObject.GetHeight(nx, nz)) <= b_MaxFlatDifference)
-                                        {
-                                            float currentHeight = g_GameObject.GetHeight(nx, nz); 
-                                            float newHeight = (1.0f - b_smoothnessFactor) * currentHeight +
-                                                b_smoothnessFactor * pickedHeight;
-
-                                            g_GameObject.SetHeight(nx, nz, newHeight);
-                                        }
-                                        
-                                    }
-                                }
-                            }
-                        }
-                        g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
-                        break;
-                    }
-                }
-
-                Position += rayDirection * stepSize;
-                currentDistance += stepSize;
-            }
+            FlattenBrush(hWnd, lParam, false);
         }
         break;
     }
@@ -1019,7 +1052,7 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
 
                 // Update the target and camera positions
                 XMFLOAT3 newTargetPos;
-                XMStoreFloat3(&newTargetPos, newTargetVec);
+                DirectX::XMStoreFloat3(&newTargetPos, newTargetVec);
 
                 g_pCamera->SetOnlyTarget(newTargetPos);
                 g_pCamera->UpdatePositionWithTargetMove(XMFLOAT3(
@@ -1032,6 +1065,9 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
                 lastMousePos = mousePos;
 
                 break; // Exit the loop after processing the input
+            }
+            else if (b_FlatBool){
+                FlattenBrush(hWnd, lParam, true);
             }
         }
         else { isFirstClick = true; }
@@ -1181,7 +1217,7 @@ void DSGUI() {
     ImGui::Begin("Diamond Square Terrain", 0, ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::SetNextItemWidth(SliderWidth * ScaleX);
     ImGui::SliderInt("Detail", &t_detail, 4, 11);
-    HelpMarker("The size of the terrain, it is 2 to the power of the detail number + 1, so a detail of 9 is a terrain of 513x513 and 10 would be 1025x1025 and 11 is 2049x2049.");
+    HelpMarker("The size of the terrain, so a detail of 9 is 513x513 and 10 would be 1025x1025 and 11 is 2049x2049.");
     ImGui::SetNextItemWidth(SliderWidth * ScaleX);
     ImGui::SliderFloat("Roughness", &t_roughness, 0, 1);
     HelpMarker("The maximum difference between vertices, 0 is flat and 1 is very jagged.");
@@ -1261,14 +1297,14 @@ void NoiseGUI() {
         GenerateNoiseImageAndTerrain(FALSE, TRUE);
 
     }
-    HelpMarker("The height of the noise terrain, scales the 0 - 1 values of the noise to 0 to height.");
+    HelpMarker("The height of the noise terrain");
     ImGui::SetNextItemWidth(SliderWidth * ScaleX);
     if (ImGui::SliderFloat("Floor/Sea Level", &n_floor, 0, 1023))
     {
         GenerateNoiseImageAndTerrain(FALSE, TRUE);
 
     }
-    HelpMarker("The lowest height value the terrain model can go");
+    HelpMarker("The height value for the floor of the terrain");
     ImGui::Text("\nNoise Specific Options");
     ImGui::Text("\nPerlin Noise Parameters");
     ImGui::SetNextItemWidth(SliderWidth * ScaleX);
@@ -1390,8 +1426,8 @@ void NoiseGUI() {
 void NoiseImage() {
     ImGui::SetNextWindowPos(ImVec2((10 + UIWidthL) * ScaleX, 10 * ScaleY + height));
     ImGui::Begin("Noise Image", 0, ImGuiWindowFlags_AlwaysAutoResize);
-    HelpMarker("Noise represented as a height map");
-    ImGui::SetNextItemWidth(50);
+    HelpMarker("Noise represented as an image");
+    ImGui::SetNextItemWidth(50 * ScaleX);
     ImGui::SliderInt("Image Size", &n_imageSize, 50, 500);
     ImGui::Image((ImTextureID)(intptr_t)n_texture, ImVec2(n_imageSize * ScaleX, n_imageSize * ScaleY));
     ImGui::End();
@@ -1400,7 +1436,7 @@ void File() {
     ImGui::SetNextWindowSizeConstraints(ImVec2(UIWidthR * ScaleX, 80 * ScaleY), ImVec2(UIWidthR * ScaleX, 90 * ScaleY));
     ImGui::SetNextWindowPos(ImVec2(screenWidth - (10 + UIWidthR) * ScaleX, 10 * ScaleY));
     ImGui::Begin("File", 0, ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::SetNextItemWidth(180);
+    ImGui::SetNextItemWidth(180*ScaleX);
     ImGui::InputText("File Name", s_fileName, 32);
     if (ImGui::Button("Export"))
     {
@@ -1416,7 +1452,14 @@ void Intro() {
     ImGui::SetNextWindowSizeConstraints(ImVec2((UIWidthR + 30) * ScaleX, 80 * ScaleY), ImVec2((UIWidthR+30) * ScaleX, 400 * ScaleY));
     ImGui::SetNextWindowPos(ImVec2(screenWidth - (10 + UIWidthR + UIWidthR + 30) * ScaleX, 10 * ScaleY));
     ImGui::Begin("Information", 0, ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::TextWrapped("This is a terrain generation tool.The two terrain generation modes Diamond Square and noise do not currently work together.\n\nCamera movement, right click will rotate the camera around the centre point, and press Control + Left Click to move the rotation point. And to zoom in and out you use the scroll wheel.\n\nTo directly edit slider values you can Control + Left Click on the sliders to access the value entry mode \n\nClick the arrow at the top of this window to minimize this text.");
+    ImGui::TextWrapped("This is a terrain generation tool. The two terrain generation modes Diamond Square and noise do not currently work together.\n\nCamera movement, right click will rotate the camera around the centre point, and press Control + Left Click to move the rotation point. And to zoom in and out you use the scroll wheel.\n\nTo directly edit slider values you can Control + Left Click on the sliders to access the value entry mode \n\nClick the arrow at the top of this window to minimize this text.");
+    if (ImGui::Button("Showcase terrain values")) {
+        n_PerlinOctaves = 5;
+        n_Exponent = 4.861f;
+        n_resolution = 565;
+        n_PerlinFrequency = 0.007f;
+        GenerateNoiseImageAndTerrain(true, true);
+    }
     ImGui::End();
 }
 void View() {
@@ -1444,15 +1487,15 @@ void Brush() {
     ImGui::Begin("Terrain Brush", 0, ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::Checkbox("Flatten Brush Enabled", &b_FlatBool);
     HelpMarker("Enables the flatten brush so it flattens on left click");
-    ImGui::SetNextItemWidth(120);
+    ImGui::SetNextItemWidth(120*ScaleX);
     ImGui::InputInt("Flatten Size", &b_FlatSize);
-    HelpMarker("changes the size of the brush so the bigger the bigger the area it flattens");
-    ImGui::SetNextItemWidth(120);
+    HelpMarker("Changes the size of the brush so the bigger the value the bigger the area it flattens");
+    ImGui::SetNextItemWidth(120*ScaleX);
     ImGui::InputFloat("Max Height Diff", &b_MaxFlatDifference);
     HelpMarker("The maximum difference in the picked height and the surrounding height that will get flattened");
-    ImGui::SetNextItemWidth(120);
+    ImGui::SetNextItemWidth(120*ScaleX);
     ImGui::SliderFloat("Smoothness", &b_smoothnessFactor, 0.0f, 1.0f);
-    HelpMarker("adds some variance to flatten so its not completely flat. 1 is completely flat");
+    HelpMarker("Adds some variance to flatten so its not completely flat. 1 is completely flat");
 
     ImGui::End();
 }
