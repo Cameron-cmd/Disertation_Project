@@ -26,6 +26,8 @@
 #include <random>
 #include <thread>
 
+#include "nfd.h"
+
 Camera* g_pCamera;
 
 #define SliderWidth 250
@@ -146,6 +148,10 @@ float b_smoothnessFactor = 0.5f;
 
 float c_sensitivity = 1.0f;
 float c_zoomSens = 0.35f;
+
+string SaveLocation;
+string LoadObjLocation;
+string LoadImageLocation;
 //--------------------------------------------------------------------------------------
 // Entry point to the program. Initializes everything and goes into a message processing 
 // loop. Idle time is used to render the scene.
@@ -1122,6 +1128,57 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
     return 0;
 }
 
+void OpenFileDialog(bool imgObj) {
+    nfdchar_t* outPath = NULL;
+    const nfdchar_t* filterList;
+    // File type filter as a string (semicolon-separated extensions for multiple types)
+    if (imgObj) {
+        filterList = "png,jpg";
+    }
+    else if (!imgObj) {
+        filterList = "obj";
+    }
+    // Show the open file dialog
+    nfdresult_t result = NFD_OpenDialog(filterList, NULL, &outPath);
+
+    if (result == NFD_OKAY) {
+        std::cout << "Selected file: " << outPath << std::endl;
+        SaveLocation = (string)outPath;
+        free(outPath); // Free memory allocated for the file path
+    }
+    else if (result == NFD_CANCEL) {
+        std::cout << "User pressed cancel." << std::endl;
+    }
+    else {
+        std::cout << "Error: " << NFD_GetError() << std::endl;
+    }
+}
+
+void OpenFolderDialog() {
+    nfdchar_t* outPath = NULL;
+
+    //// File type filter as a string (semicolon-separated extensions for multiple types)
+    //const nfdchar_t* filterList = "txt";
+
+    //// Default path for the dialog (can be NULL for the current directory)
+    //const nfdchar_t* defaultPath = NULL;
+
+    // Show the open file dialog
+    nfdresult_t result = NFD_PickFolder(NULL, &outPath);
+
+    if (result == NFD_OKAY) {
+        std::cout << "Selected file: " << outPath << std::endl;
+        SaveLocation = (string)outPath;
+        free(outPath); // Free memory allocated for the file path
+    }
+    else if (result == NFD_CANCEL) {
+        std::cout << "User pressed cancel." << std::endl;
+    }
+    else {
+        std::cout << "Error: " << NFD_GetError() << std::endl;
+    }
+}
+
 void setupLightForRender()
 {
     Light light;
@@ -1175,7 +1232,7 @@ float calculateDeltaTime()
 void saveTerrain()
 {
     std::string fileName = std::string(s_fileName) + ".obj";
-    ofstream myfile(fileName);
+    ofstream myfile(SaveLocation+"\\"+fileName);
     int CountVertices = 0;
     int CountIndices = 0;
     int IndexCount = g_GameObject.GetIndexCount();
@@ -1438,8 +1495,18 @@ void File() {
     ImGui::Begin("File", 0, ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::SetNextItemWidth(180*ScaleX);
     ImGui::InputText("File Name", s_fileName, 32);
+    if (ImGui::Button("Load obj file"))
+    {
+        OpenFileDialog(false);
+    }
+    if (ImGui::Button("Load height map image"))
+    {
+        OpenFileDialog(true);
+
+    }
     if (ImGui::Button("Export"))
     {
+        OpenFolderDialog();
         saveTerrain();
     }
     HelpMarker("Exports the file in the programs file location");

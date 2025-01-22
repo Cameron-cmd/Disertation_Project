@@ -31,6 +31,8 @@
     </ClCompile>
     <ClCompile Include="TerrainGenDS.cpp" />
     <ClCompile Include="HydraulicErosion.cpp" />
+    <ClCompile Include="nfd_common.c" />
+    <ClCompile Include="nfd_win.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Camera.h" />
@@ -67,6 +69,8 @@
     <ClInclude Include="TerrainGenDS.h" />
     <ClInclude Include="HydraulicErosion.h" />
     <ClInclude Include="FastNoiseLite.h" />
+    <ClInclude Include="nfd.h" />
+    <ClInclude Include="nfd_common.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="Tutorial01.rc" />
