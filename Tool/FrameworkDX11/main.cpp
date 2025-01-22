@@ -908,7 +908,6 @@ void FlattenBrush(HWND hWnd, WPARAM lParam, bool held)
     int pickedZ = F3.z;
     float pickedHeight = F3.y;
     float size = g_GameObject.GetSize();
-    // Iterate over the circle's bounding box
     for (int dx = -b_FlatSize; dx <= b_FlatSize; dx++) {
         for (int dz = -b_FlatSize; dz <= b_FlatSize; dz++) {
             int nx = pickedX + dx;
@@ -916,7 +915,6 @@ void FlattenBrush(HWND hWnd, WPARAM lParam, bool held)
 
             // Check bounds
             if (nx >= 0 && nx < size && nz >= 0 && nz < size) {
-                // Check if the point is within the circle
                 if (dx * dx + dz * dz <= b_FlatSize * b_FlatSize) {
                     if (abs(pickedHeight - g_GameObject.GetHeight(nx, nz)) <= b_MaxFlatDifference)
                     {
@@ -982,10 +980,8 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
 
     case WM_MOUSEWHEEL:
     {
-        // Scroll direction
         int delta = GET_WHEEL_DELTA_WPARAM(wParam);
 
-        // Zoom in/out
         g_pCamera->Zoom(-delta * c_zoomSens);
         break;
     }
@@ -1014,10 +1010,8 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
     {
         static bool isFirstClick = true;
         if (mouseDownL) {
-            // Track if it's the first click
-            static POINTS lastMousePos = {}; // Persist last mouse position across frames
+            static POINTS lastMousePos = {};
             if (isFirstClick) {
-                // Initialize lastMousePos on the first click
                 lastMousePos = MAKEPOINTS(lParam);
                 isFirstClick = false;
             }
@@ -1025,38 +1019,29 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
             {
                 POINTS mousePos = MAKEPOINTS(lParam);
 
-                // Calculate the delta of the mouse movement
                 POINTS delta = { mousePos.x - lastMousePos.x, mousePos.y - lastMousePos.y };
 
-                // Define a sensitivity for the movement
 
-                // Load camera position and target position
                 XMFLOAT3 cameraPos = g_pCamera->GetPosition();
                 XMFLOAT3 targetPos = g_pCamera->GetTarget();
 
-                // Compute the direction vector from the camera to the target
                 XMVECTOR camPosVec = XMLoadFloat3(&cameraPos);
                 XMVECTOR targetPosVec = XMLoadFloat3(&targetPos);
-                XMVECTOR viewDirection = XMVector3Normalize(targetPosVec - camPosVec); // Forward direction
+                XMVECTOR viewDirection = XMVector3Normalize(targetPosVec - camPosVec); 
 
-                // Calculate the right and up vectors relative to the view direction
-                XMVECTOR upVec = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f); // World up vector
-                XMVECTOR rightVec = XMVector3Normalize(XMVector3Cross(upVec, viewDirection)); // Right direction
-                upVec = XMVector3Normalize(XMVector3Cross(viewDirection, rightVec)); // Adjusted up direction
+                XMVECTOR upVec = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f); 
+                XMVECTOR rightVec = XMVector3Normalize(XMVector3Cross(upVec, viewDirection));
+                upVec = XMVector3Normalize(XMVector3Cross(viewDirection, rightVec));
 
-                // Scale movement by sensitivity and delta
                 XMVECTOR deltaMovement = XMVectorAdd(
-                    XMVectorScale(rightVec, -delta.x * c_sensitivity), // Left-right movement
-                    XMVectorScale(upVec, delta.y * c_sensitivity)    // Up-down movement (inverted to match screen coordinates)
+                    XMVectorScale(rightVec, -delta.x * c_sensitivity),
+                    XMVectorScale(upVec, delta.y * c_sensitivity)
                 );
 
-                // Get the current target and update its position
                 XMVECTOR newTargetVec = targetPosVec + deltaMovement;
 
-                // Compute the delta for the camera as well (to keep look direction constant)
                 XMVECTOR targetDelta = newTargetVec - targetPosVec;
 
-                // Update the target and camera positions
                 XMFLOAT3 newTargetPos;
                 DirectX::XMStoreFloat3(&newTargetPos, newTargetVec);
 
@@ -1067,10 +1052,9 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
                     XMVectorGetZ(targetDelta)
                 ));
 
-                // Save the last mouse position for the next frame
                 lastMousePos = mousePos;
 
-                break; // Exit the loop after processing the input
+                break;
             }
             else if (b_FlatBool){
                 FlattenBrush(hWnd, lParam, true);
@@ -1131,20 +1115,18 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
 void OpenFileDialog(bool imgObj) {
     nfdchar_t* outPath = NULL;
     const nfdchar_t* filterList;
-    // File type filter as a string (semicolon-separated extensions for multiple types)
     if (imgObj) {
         filterList = "png,jpg";
     }
     else if (!imgObj) {
         filterList = "obj";
     }
-    // Show the open file dialog
     nfdresult_t result = NFD_OpenDialog(filterList, NULL, &outPath);
 
     if (result == NFD_OKAY) {
         std::cout << "Selected file: " << outPath << std::endl;
         SaveLocation = (string)outPath;
-        free(outPath); // Free memory allocated for the file path
+        free(outPath);
     }
     else if (result == NFD_CANCEL) {
         std::cout << "User pressed cancel." << std::endl;
@@ -1157,19 +1139,12 @@ void OpenFileDialog(bool imgObj) {
 void OpenFolderDialog() {
     nfdchar_t* outPath = NULL;
 
-    //// File type filter as a string (semicolon-separated extensions for multiple types)
-    //const nfdchar_t* filterList = "txt";
-
-    //// Default path for the dialog (can be NULL for the current directory)
-    //const nfdchar_t* defaultPath = NULL;
-
-    // Show the open file dialog
     nfdresult_t result = NFD_PickFolder(NULL, &outPath);
 
     if (result == NFD_OKAY) {
         std::cout << "Selected file: " << outPath << std::endl;
         SaveLocation = (string)outPath;
-        free(outPath); // Free memory allocated for the file path
+        free(outPath);
     }
     else if (result == NFD_CANCEL) {
         std::cout << "User pressed cancel." << std::endl;
@@ -1239,20 +1214,35 @@ void saveTerrain()
     SimpleVertex* SV = g_GameObject.GetVertices();
     DWORD* Faces = g_GameObject.GetIndices();
     int size = g_GameObject.GetSize();
+    string output;
     if (myfile)
     {
         for (int x = 0; x < size; x++) {
             for (int y = 0; y < size; y++) {
                 myfile << "v " << SV[CountVertices].Pos.x << ' ' << SV[CountVertices].Pos.y << ' ' << SV[CountVertices].Pos.z << "\n";
+                //output += "v " + (int)SV[CountVertices].Pos.x + ' ' + (int)SV[CountVertices].Pos.y + ' ' + (int)SV[CountVertices].Pos.z + (string)"\n";
                 myfile << "vn " << SV[CountVertices].Normal.x << ' ' << SV[CountVertices].Normal.y << ' ' << SV[CountVertices].Normal.z << "\n";
+                //output += "vn " + (int)SV[CountVertices].Normal.x + ' ' + (int)SV[CountVertices].Normal.y + ' ' + (int)SV[CountVertices].Normal.z + (string)"\n";
                 CountVertices++;
+                if (CountVertices % 10)
+                {
+                    myfile << output;
+                    output.clear();
+                }
             }
         }
-
+        
+        output.clear();
         while(CountIndices < IndexCount) {
             myfile << "f " << Faces[CountIndices]+1 << ' ' << Faces[CountIndices+1]+1 << ' ' << Faces[CountIndices+2]+1 << "\n";
+            //output += "f " + Faces[CountIndices] + 1 + ' ' + Faces[CountIndices + 1] + 1 + ' ' + Faces[CountIndices + 2] + 1 + (string)"\n";
             CountIndices += 3;
+            if (CountIndices % 9) {
+                myfile << output;
+                output.clear();
+            }
         }
+        myfile << output;
     }
 }
 
