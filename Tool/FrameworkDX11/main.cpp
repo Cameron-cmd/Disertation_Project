@@ -152,13 +152,16 @@ float b_SmoothnessFactor = 0.5f;
 
 bool b_RaiseBool = false;
 int b_RaiseSize = 5;
+float b_RaiseRate = 1.0f;
 float b_RaiseStrength = 0.5f;
 
 bool b_LowerBool = false;
 int b_LowerSize = 5;
+float b_LowerRate = 1.0f;
 float b_LowerStrength = 0.5f;
 
 bool b_SmoothBool = false;
+float b_SmoothRate = 0.1;
 int b_SmoothSize = 5;
 
 float c_sensitivity = 1.0f;
@@ -169,6 +172,11 @@ string LoadObjLocation;
 string LoadImageLocation;
 
 int TerrainGenerationMode = 1;
+
+POINTS mousePos;
+RECT rect;
+bool mouseDownR = false;
+bool mouseDownL = false;
 //--------------------------------------------------------------------------------------
 // Entry point to the program. Initializes everything and goes into a message processing 
 // loop. Idle time is used to render the scene.
@@ -869,20 +877,19 @@ struct brushReturn {
     DirectX::XMVECTOR StructPositon;
     XMFLOAT3 StructPickedPosition;
 
-    brushReturn(DirectX::XMVECTOR Pos, XMFLOAT3 F3) { StructPositon = Pos; StructPickedPosition = F3; }
+    XMVECTOR RayDirection;
+
+    brushReturn(DirectX::XMVECTOR Pos, XMFLOAT3 F3, XMVECTOR V) { StructPositon = Pos; StructPickedPosition = F3; RayDirection = V; }
 };
 
-brushReturn RaycastBrush(HWND hWnd, WPARAM lParam)
+brushReturn RaycastBrush()
 {
     XMFLOAT3 cameraPosition = g_pCamera->GetPosition();
     XMVECTOR rayOrigin = XMLoadFloat3(&cameraPosition);
-    POINTS mousePos = MAKEPOINTS(lParam);
     XMFLOAT2 temp = XMFLOAT2(mousePos.x, mousePos.y);
     XMVECTOR cursorPos = XMLoadFloat2(&temp);
     XMMATRIX mGO = XMLoadFloat4x4(g_GameObject.getTransform());
     XMMATRIX World = XMMatrixTranspose(mGO);
-    RECT rect;
-    GetClientRect(hWnd, &rect);
     float viewportWidth = (float)(rect.right - rect.left);
     float viewportHeight = (float)(rect.bottom - rect.top);
     XMVECTOR rayDirection = XMVector3Normalize(XMVector3Unproject(cursorPos, 0, 0,
@@ -907,41 +914,66 @@ brushReturn RaycastBrush(HWND hWnd, WPARAM lParam)
             float pickedHeight = g_GameObject.GetHeight(pickedX, pickedZ);
             if (abs(XMVectorGetY(Position) - pickedHeight) <= 2)
             {
-                return brushReturn(Position, XMFLOAT3(pickedX, pickedHeight, pickedZ));
+                return brushReturn(Position, XMFLOAT3(pickedX, pickedHeight, pickedZ), rayDirection);
             }
         }
         Position += rayDirection * stepSize;
         currentDistance += stepSize;
     }
-    return brushReturn(Position, XMFLOAT3(-1, -1, -1));
+    return brushReturn(Position, XMFLOAT3(-1, -1, -1), rayDirection);
 }
 
-void FlattenBrush(HWND hWnd, WPARAM lParam, bool held)
+void BrushFunc(bool held, int BrushNumber, int BrushSize)
 {
-    brushReturn info = RaycastBrush(hWnd, lParam);
+    brushReturn info = RaycastBrush();
     XMVECTOR Position = info.StructPositon;
     XMFLOAT3 F3 = info.StructPickedPosition;
     int pickedX = F3.x;
     int pickedZ = F3.z;
-    float pickedHeight = F3.y;
+    int pickedHeight = F3.y;
     float size = g_GameObject.GetSize();
-    for (int dx = -b_FlatSize; dx <= b_FlatSize; dx++) {
-        for (int dz = -b_FlatSize; dz <= b_FlatSize; dz++) {
+    for (int dx = -BrushSize; dx <= BrushSize; dx++) {
+        for (int dz = -BrushSize; dz <= BrushSize; dz++) {
             int nx = pickedX + dx;
             int nz = pickedZ + dz;
 
             // Check bounds
             if (nx >= 0 && nx < size && nz >= 0 && nz < size) {
-                if (dx * dx + dz * dz <= b_FlatSize * b_FlatSize) {
-                    if (abs(pickedHeight - g_GameObject.GetHeight(nx, nz)) <= b_MaxFlatDifference)
+                if (dx * dx + dz * dz <= BrushSize * BrushSize) {
+                    float curheight = g_GameObject.GetHeight(nx, nz);
+                    //Raise brush
+                    if (BrushNumber == 1)
                     {
-                        float currentHeight = g_GameObject.GetHeight(nx, nz);
-                        float newHeight = (1.0f - b_SmoothnessFactor) * currentHeight +
-                            b_SmoothnessFactor * pickedHeight;
+                        float distanceFactor = sqrt(pow(dx, 2) + pow(dz, 2)) / BrushSize;
+
+                        float weight = pow(1 - distanceFactor, b_RaiseStrength);
+
+                        float newHeight = weight * b_RaiseRate + curheight;
 
                         g_GameObject.SetHeight(nx, nz, newHeight);
                     }
+                    //Lower / Depression brush
+                    else if (BrushNumber == 2)
+                    {
+                        float distanceFactor = sqrt(pow(dx, 2) + pow(dz, 2)) / BrushSize;
 
+                        float weight = pow(1 - distanceFactor, b_LowerStrength);
+
+                        float newHeight = curheight - weight * b_LowerRate ;
+
+                        g_GameObject.SetHeight(nx, nz, newHeight);
+                    }
+                    //Flatten brush
+                    else if (BrushNumber == 3)
+                    {
+                        if (abs(pickedHeight - g_GameObject.GetHeight(nx, nz)) <= b_MaxFlatDifference)
+                        {
+                            float currentHeight = g_GameObject.GetHeight(nx, nz);
+                            float newHeight = (1.0f - b_SmoothnessFactor) * currentHeight + b_SmoothnessFactor * pickedHeight;
+
+                            g_GameObject.SetHeight(nx, nz, newHeight);
+                        }
+                    }
                 }
             }
         }
@@ -949,7 +981,7 @@ void FlattenBrush(HWND hWnd, WPARAM lParam, bool held)
     if (held)
     {
         static int frame = 0;
-        if (frame % 3 == 0)
+        if (frame % 5 == 0)
         {
             g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
         }
@@ -959,107 +991,76 @@ void FlattenBrush(HWND hWnd, WPARAM lParam, bool held)
         g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
     }
 }
-void RaiseBrush(HWND hWnd, WPARAM lParam, bool held)
+
+void SmoothBrush(bool held, int BrushSize)
 {
-    brushReturn info = RaycastBrush(hWnd, lParam);
+    brushReturn info = RaycastBrush();
     XMVECTOR Position = info.StructPositon;
     XMFLOAT3 F3 = info.StructPickedPosition;
+    XMVECTOR rayDirection = info.RayDirection;
+    XMVECTOR rightDirection = XMVector3Cross(rayDirection, XMVectorSet(0, 1, 0, 0)); // Correct cross product
+
     int pickedX = F3.x;
     int pickedZ = F3.z;
-    float pickedHeight = F3.y;
     float size = g_GameObject.GetSize();
-    for (int dx = -b_FlatSize; dx <= b_FlatSize; dx++) {
-        for (int dz = -b_FlatSize; dz <= b_FlatSize; dz++) {
+
+    std::vector<XMFLOAT3> addVector;
+
+    for (int dx = -BrushSize; dx <= BrushSize; dx++) {
+        for (int dz = -BrushSize; dz <= BrushSize; dz++) {
             int nx = pickedX + dx;
             int nz = pickedZ + dz;
 
             // Check bounds
             if (nx >= 0 && nx < size && nz >= 0 && nz < size) {
-                if (dx * dx + dz * dz <= b_FlatSize * b_FlatSize) {
-                    
-                    
-                    
-                    g_GameObject.SetHeight(nx, nz, 0);
-                }
-            }
-        }
-    }
-    if (held)
-    {
-        static int frame = 0;
-        if (frame % 3 == 0)
-        {
-            g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
-        }
-        frame++;
-    }
-    else {
-        g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
-    }
-}
-void LowerBrush(HWND hWnd, WPARAM lParam, bool held)
-{
-    brushReturn info = RaycastBrush(hWnd, lParam);
-    XMVECTOR Position = info.StructPositon;
-    XMFLOAT3 F3 = info.StructPickedPosition;
-    int pickedX = F3.x;
-    int pickedZ = F3.z;
-    float pickedHeight = F3.y;
-    float size = g_GameObject.GetSize();
-    for (int dx = -b_FlatSize; dx <= b_FlatSize; dx++) {
-        for (int dz = -b_FlatSize; dz <= b_FlatSize; dz++) {
-            int nx = pickedX + dx;
-            int nz = pickedZ + dz;
+                XMVECTOR vertexPos = XMVectorSet(nx, g_GameObject.GetHeight(nx, nz), nz, 1);
 
-            // Check bounds
-            if (nx >= 0 && nx < size && nz >= 0 && nz < size) {
-                if (dx * dx + dz * dz <= b_FlatSize * b_FlatSize) {
-                    
-                    g_GameObject.SetHeight(nx, nz, 0);
-                }
-            }
-        }
-    }
-    if (held)
-    {
-        static int frame = 0;
-        if (frame % 3 == 0)
-        {
-            g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
-        }
-        frame++;
-    }
-    else {
-        g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
-    }
-}
-void SmoothBrush(HWND hWnd, WPARAM lParam, bool held)
-{
-    brushReturn info = RaycastBrush(hWnd, lParam);
-    XMVECTOR Position = info.StructPositon;
-    XMFLOAT3 F3 = info.StructPickedPosition;
-    int pickedX = F3.x;
-    int pickedZ = F3.z;
-    float pickedHeight = F3.y;
-    float size = g_GameObject.GetSize();
-    for (int dx = -b_FlatSize; dx <= b_FlatSize; dx++) {
-        for (int dz = -b_FlatSize; dz <= b_FlatSize; dz++) {
-            int nx = pickedX + dx;
-            int nz = pickedZ + dz;
+                // Project onto the brush plane
+                XMVECTOR offset = vertexPos - XMLoadFloat3(&F3);
+                float vx = XMVectorGetX(XMVector3Dot(offset, rightDirection));
+                float vz = XMVectorGetX(XMVector3Dot(offset, rayDirection));
 
-            // Check bounds
-            if (nx >= 0 && nx < size && nz >= 0 && nz < size) {
-                if (dx * dx + dz * dz <= b_FlatSize * b_FlatSize) {
-                    g_GameObject.SetHeight(nx, nz, 0);
+                // Check if within the brush circle
+                if (vx * vx + vz * vz <= BrushSize * BrushSize) {
+                    // Compute average height (with bounds check)
+                    float avgHeight = g_GameObject.GetHeight(nx, nz);
+                    int neighborCount = 1;
+
+                    if (nx + 1 < size) {
+                        avgHeight += g_GameObject.GetHeight(nx + 1, nz);
+                        neighborCount++;
+                    }
+                    if (nx - 1 >= 0) {
+                        avgHeight += g_GameObject.GetHeight(nx - 1, nz);
+                        neighborCount++;
+                    }
+                    if (nz + 1 < size) {
+                        avgHeight += g_GameObject.GetHeight(nx, nz + 1);
+                        neighborCount++;
+                    }
+                    if (nz - 1 >= 0) {
+                        avgHeight += g_GameObject.GetHeight(nx, nz - 1);
+                        neighborCount++;
+                    }
+                    avgHeight /= neighborCount;
+                    float newHeight = b_SmoothRate * avgHeight + (1 - b_SmoothRate) * g_GameObject.GetHeight(nx,nz);
+
+                    // Add smoothed height to update vector
+                    addVector.push_back(XMFLOAT3(nx, newHeight, nz));
                 }
             }
         }
     }
-    if (held)
-    {
+
+    // Apply smoothed heights
+    for (const auto& val : addVector) {
+        g_GameObject.SetHeight(val.x, val.z, val.y); // Adjust SetHeight argument order
+    }
+
+    // Clean up and rebuild the mesh
+    if (held) {
         static int frame = 0;
-        if (frame % 3 == 0)
-        {
+        if (frame % 5 == 0) {
             g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
         }
         frame++;
@@ -1076,10 +1077,7 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
     PAINTSTRUCT ps;
     HDC hdc;
 
-    static bool mouseDownR = false;
-    static bool mouseDownL = false;
-
-    RECT rect;
+    mousePos = MAKEPOINTS(lParam);
     GetClientRect(hWnd, &rect);
 
     // Calculate the center position of the window
@@ -1090,29 +1088,6 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
     extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
     if (ImGui_ImplWin32_WndProcHandler(hWnd, message, wParam, lParam))
         return true;
-
-    if (GetAsyncKeyState(VK_LBUTTON) & 0x8000) {
-        if (!(GetAsyncKeyState(VK_CONTROL) & 0x8000))
-        {
-            if (b_FlatBool)
-            {
-                FlattenBrush(hWnd, lParam, true);
-            }
-            else if (b_RaiseBool)
-            {
-                RaiseBrush(hWnd, lParam, true);
-            }
-            else if (b_LowerBool)
-            {
-                LowerBrush(hWnd, lParam, true);
-            }
-            else if (b_SmoothBool)
-            {
-                SmoothBrush(hWnd, lParam, true);
-            }
-        }
-    }
-
 
     switch( message )
     {
@@ -1145,6 +1120,7 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
     case WM_LBUTTONDOWN:
     {
         mouseDownL = true;
+        break;
     }
     case WM_LBUTTONUP:
         mouseDownL = false;
@@ -1155,12 +1131,11 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
         if (mouseDownL) {
             static POINTS lastMousePos = {};
             if (isFirstClick) {
-                lastMousePos = MAKEPOINTS(lParam);
+                lastMousePos = mousePos;
                 isFirstClick = false;
             }
             if (GetAsyncKeyState(VK_CONTROL) & 0x8000)
             {
-                POINTS mousePos = MAKEPOINTS(lParam);
 
                 POINTS delta = { mousePos.x - lastMousePos.x, mousePos.y - lastMousePos.y };
 
@@ -1208,7 +1183,6 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
             ClientToScreen(hWnd, &windowCenter);
 
             // Get the current cursor position
-            POINTS mousePos = MAKEPOINTS(lParam);
             POINT cursorPos = { mousePos.x, mousePos.y };
             ClientToScreen(hWnd, &cursorPos);
 
@@ -1402,6 +1376,7 @@ static void HelpMarker(const char* desc)
         ImGui::EndTooltip();
     }
 }
+
 void DSGUI() {
     ImGui::SetNextWindowSizeConstraints(ImVec2(UIWidthL * ScaleX, 80 * ScaleY), ImVec2(UIWidthL * ScaleX, 1500 * ScaleY));
     ImGui::SetNextWindowPos(ImVec2(10 * ScaleX, 10 * ScaleY));
@@ -1427,6 +1402,7 @@ void DSGUI() {
     height = ImGui::GetWindowHeight();
     ImGui::End();
 }
+
 void HydroErosionGUI() {
     ImGui::SetNextWindowSizeConstraints(ImVec2(UIWidthL * 0.9 * ScaleX, 80 * ScaleY), ImVec2(UIWidthL * ScaleX, 1500 * ScaleY));
     ImGui::SetNextWindowPos(ImVec2((10) * ScaleX, 10 * ScaleY));
@@ -1464,6 +1440,7 @@ void HydroErosionGUI() {
     width = ImGui::GetWindowWidth();
     ImGui::End();
 }
+
 void NoiseGUI() {
     ImGui::SetNextWindowSizeConstraints(ImVec2(UIWidthL * ScaleX, 300 * ScaleY), ImVec2(UIWidthL * ScaleX, 1500 * ScaleY));
     ImGui::SetNextWindowPos(ImVec2(10 * ScaleX, 10 * ScaleY + (int)height));
@@ -1614,6 +1591,7 @@ void NoiseGUI() {
     HelpMarker("Incase of mistakes this will reset the noise to how it was before you changed it with the brushes or hydraulic erosion.");
     ImGui::End();
 }
+
 void NoiseImage() {
     ImGui::SetNextWindowPos(ImVec2((10 + width) * ScaleX , 10 * ScaleY));
     ImGui::Begin("Noise Image", 0, ImGuiWindowFlags_AlwaysAutoResize);
@@ -1623,6 +1601,7 @@ void NoiseImage() {
     ImGui::Image((ImTextureID)(intptr_t)n_texture, ImVec2(n_imageSize * ScaleX, n_imageSize * ScaleY));
     ImGui::End();
 }
+
 void File() {
     ImGui::SetNextWindowSizeConstraints(ImVec2(UIWidthR * ScaleX, 80 * ScaleY), ImVec2(UIWidthR * ScaleX, 90 * ScaleY));
     ImGui::SetNextWindowPos(ImVec2(screenWidth - (10 + UIWidthR) * ScaleX, 10 * ScaleY));
@@ -1663,6 +1642,7 @@ void Intro() {
     }
     ImGui::End();
 }
+
 void View() {
     ImGui::SetNextWindowSizeConstraints(ImVec2(UIWidthR * ScaleX, 80 * ScaleY), ImVec2(UIWidthR * ScaleX, 600 * ScaleY));
     ImGui::SetNextWindowPos(ImVec2(screenWidth - (10 + UIWidthR) * ScaleX, 10 * ScaleY + height));
@@ -1682,7 +1662,9 @@ void View() {
     height += ImGui::GetWindowHeight();
     ImGui::End();
 }
-void Brush() {
+
+void Brush()
+{
     ImGui::SetNextWindowSizeConstraints(ImVec2(UIWidthR * ScaleX, 80 * ScaleY), ImVec2(UIWidthR * ScaleX, 500 * ScaleY));
     ImGui::SetNextWindowPos(ImVec2(screenWidth - (10 + UIWidthR) * ScaleX, 10 * ScaleY + height));
     ImGui::Begin("Terrain Brush", 0, ImGuiWindowFlags_AlwaysAutoResize);
@@ -1707,6 +1689,9 @@ void Brush() {
     {
         ImGui::SetNextItemWidth(120 * ScaleX);
         ImGui::InputInt("Raise Size", &b_RaiseSize);
+        HelpMarker("TBD");        
+        ImGui::SetNextItemWidth(120 * ScaleX);
+        ImGui::InputFloat("Raise Rate", &b_RaiseRate);
         HelpMarker("TBD");
         ImGui::SetNextItemWidth(120 * ScaleX);
         ImGui::InputFloat("Raise Strength", &b_RaiseStrength);
@@ -1721,6 +1706,9 @@ void Brush() {
         ImGui::InputInt("Lower Size", &b_RaiseSize);
         HelpMarker("TBD");
         ImGui::SetNextItemWidth(120 * ScaleX);
+        ImGui::InputFloat("Lower Rate", &b_LowerRate);
+        HelpMarker("TBD");
+        ImGui::SetNextItemWidth(120 * ScaleX);
         ImGui::InputFloat("Lower Strength", &b_RaiseStrength);
         HelpMarker("TBD");
     }
@@ -1732,10 +1720,14 @@ void Brush() {
         ImGui::SetNextItemWidth(120 * ScaleX);
         ImGui::InputInt("Smooth Size", &b_SmoothSize);
         HelpMarker("TBD");
+        ImGui::SetNextItemWidth(120 * ScaleX);
+        ImGui::SliderFloat("Smooth Rate", &b_SmoothRate,0, 1.0f);
+        HelpMarker("TBD");
     }
 
     ImGui::End();
 }
+
 void TerrainGeneration()
 {
     ImGui::SetNextWindowSizeConstraints(ImVec2(width * ScaleX, 80 * ScaleY), ImVec2(width, 1500 * ScaleY));
@@ -1941,6 +1933,29 @@ void RenderDebugWindow(float deltaTime) {
 //--------------------------------------------------------------------------------------
 void Render()
 {
+    if (mouseDownL) {
+        if (!(GetAsyncKeyState(VK_CONTROL) & 0x8000))
+        {
+            if (b_FlatBool)
+            {
+                BrushFunc(true, 3, b_FlatSize);
+            }
+            else if (b_RaiseBool)
+            {
+                BrushFunc(true, 1, b_RaiseSize);
+
+            }
+            else if (b_LowerBool)
+            {
+                BrushFunc(true, 2, b_LowerSize);
+
+            }
+            else if (b_SmoothBool)
+            {
+                SmoothBrush(true, b_SmoothSize);
+            }
+        }
+    }
 
     float t = calculateDeltaTime(); // capped at 60 fps
     if (t == 0.0f)
