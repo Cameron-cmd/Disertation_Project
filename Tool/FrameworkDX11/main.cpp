@@ -26,7 +26,9 @@
 #include <random>
 #include <thread>
 #include <sstream>
+#include "DirectXTex.h"
 
+#include <wincodec.h>
 
 #include "nfd.h"
 
@@ -120,9 +122,12 @@ FastNoiseLite           n_Simplex = FastNoiseLite();
 FastNoiseLite           n_Cellular = FastNoiseLite();
 
 ID3D11ShaderResourceView* n_texture = nullptr;
+ID3D11Texture2D* n_frontTexture = nullptr;
+ID3D11Texture2D* n_backTexture = nullptr;
 
 int n_imageSize = 150;
-char                   s_fileName[32] = { "MeshFileName" };
+char                   s_modelFileName[32] = { "TerrainFileName" };
+char                   s_imageFileName[32] = { "ImageFileName" };
 
 float ScaleX;
 float ScaleY;
@@ -164,6 +169,10 @@ bool b_SmoothBool = false;
 float b_SmoothRate = 0.1;
 int b_SmoothSize = 5;
 
+bool b_ColourBool = false;
+int b_ColourSize = 5;
+XMFLOAT3 b_Colour = XMFLOAT3(0.2, 0.4, 0.3);
+
 float c_sensitivity = 1.0f;
 float c_zoomSens = 0.35f;
 
@@ -172,6 +181,8 @@ string LoadObjLocation;
 string LoadImageLocation;
 
 int TerrainGenerationMode = 1;
+
+bool loadedModel = false;
 
 POINTS mousePos;
 RECT rect;
@@ -366,19 +377,19 @@ void ProcessChunk(int startX, int endX, std::vector<std::vector<float>>* map, bo
             if (Image) {
                 int texture = (int)(normalizedColour * 255);
                 texture = max(0, min(255, texture)); // Clamp for safety
-                n_pixels[x + y * n_resolution] = (texture) | (texture << 8) | (texture << 16) | (255 << 24);
+                n_pixels[x + y * n_resolution] = texture | texture << 8 | texture << 16 | 255 << 24;
             }
         }
     }
 }
-
+void RegenerateHeightMap();
 void GenerateNoiseImageAndTerrain(bool Image, bool Terrain)
 {
     n_pixels = new uint32_t[n_resolution * n_resolution];
     memset(n_pixels, 0, sizeof(uint32_t) * n_resolution * n_resolution);
     std::vector<std::vector<float>> map(n_resolution, std::vector<float>(n_resolution));
 
-    int numThreads = std::thread::hardware_concurrency();
+    static int numThreads = std::thread::hardware_concurrency()/2;
     int chunkSize = n_resolution / numThreads;
 
     float maxWeightSum = (n_PerlinOn * n_PerlinWeight) +
@@ -405,15 +416,16 @@ void GenerateNoiseImageAndTerrain(bool Image, bool Terrain)
 
     if (Terrain) {
         g_pCamera->SetTarget(XMFLOAT3(n_resolution / 2, n_height / 2, n_resolution / 2));
+        g_pCamera->SetDistance(n_resolution);
         g_GameObject.noiseGenerateTerrain(&map, n_resolution);
         g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
     }
 
 
     if (Image) {
-        if (n_texture) {
-            n_texture->Release();
-            n_texture = nullptr;
+        if (n_backTexture) {
+            n_backTexture->Release();
+            n_backTexture = nullptr;
         }
         D3D11_SUBRESOURCE_DATA subrecData = {};
         subrecData.pSysMem = n_pixels;
@@ -428,33 +440,66 @@ void GenerateNoiseImageAndTerrain(bool Image, bool Terrain)
         desc.Usage = D3D11_USAGE_DEFAULT;
         desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
 
-        ID3D11Texture2D* texture = nullptr;
-        HRESULT hr = g_pd3dDevice->CreateTexture2D(&desc, &subrecData, &texture);
+        HRESULT hr = g_pd3dDevice->CreateTexture2D(&desc, &subrecData, &n_backTexture);
         if (FAILED(hr)) {
             OutputDebugStringA("Failed to create texture\n");
             return;
         }
-
-        D3D11_SHADER_RESOURCE_VIEW_DESC srvd = {};
-        srvd.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        srvd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-        srvd.Texture2D.MipLevels = 1;
-
-        hr = g_pd3dDevice->CreateShaderResourceView(texture, &srvd, &n_texture);
-        if (FAILED(hr)) {
-            texture->Release();
-            return;
-        }
-        texture->Release();
-        texture = nullptr;
+        std::swap(n_frontTexture, n_backTexture);
     }
     delete[] n_pixels;
     n_pixels = nullptr;
-
+    RegenerateHeightMap();
     map.clear();
     map.shrink_to_fit();
 }
 
+void RegenerateHeightMap()
+{
+    int size = g_GameObject.GetSize();
+    n_pixels = new uint32_t[size * size];
+    std::memset(n_pixels, 0, sizeof(uint32_t) * size * size);
+    float low = 300;
+    float high = 0;
+    for (int x = 0; x < size; x++) {
+        for (int y = 0; y < size; y++)
+        {
+            if (g_GameObject.GetHeight(x,y) > high) { high = g_GameObject.GetHeight(x,y); }
+            else if (g_GameObject.GetHeight(x, y) < low) { low = g_GameObject.GetHeight(x, y); }
+        }
+    }
+
+    for (int x = 0; x < size; x++) {
+        for (int y = 0; y < size; y++)
+        {
+            int colour = RatioValueConverter(low, high, 0, 255, g_GameObject.GetHeight(x, y));
+            n_pixels[x + y * size] = colour | colour << 8 | colour << 16 | 255 << 24;
+        }
+    }
+
+    D3D11_SUBRESOURCE_DATA subrecData = {};
+    subrecData.pSysMem = n_pixels;
+    subrecData.SysMemPitch = size * sizeof(uint32_t);
+
+    D3D11_TEXTURE2D_DESC desc = {};
+    desc.Width = size;
+    desc.Height = size;
+    desc.MipLevels = desc.ArraySize = 1;
+    desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    desc.SampleDesc.Count = 1;
+    desc.Usage = D3D11_USAGE_DEFAULT;
+    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+    HRESULT hr = g_pd3dDevice->CreateTexture2D(&desc, &subrecData, &n_backTexture);
+    std::swap(n_frontTexture, n_backTexture);
+    if (FAILED(hr)) {
+        OutputDebugStringA("Failed to create texture\n");
+        delete[] n_pixels;
+        n_pixels = nullptr;
+        return;
+    }
+
+}
 //--------------------------------------------------------------------------------------
 // Create Direct3D device and swap chain
 //--------------------------------------------------------------------------------------
@@ -694,10 +739,10 @@ HRESULT		InitRunTimeParameters()
     n_Simplex.SetFrequency(n_SimplexFrequency);
     n_Cellular.SetNoiseType(n_Cellular.NoiseType_Cellular);
     n_Cellular.SetFrequency(n_CellularFrequency);
-    GenerateNoiseImageAndTerrain(TRUE, FALSE);
 
     g_GameObject.setDetailRoughness(t_detail, t_roughness);
-    g_GameObject.generateTerrain();
+    g_GameObject.generateTerrain(n_pixels, n_backTexture, g_pd3dDevice);
+    std::swap(n_frontTexture, n_backTexture);
     HRESULT hr = g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
 
 
@@ -928,6 +973,10 @@ void BrushFunc(bool held, int BrushNumber, int BrushSize)
     brushReturn info = RaycastBrush();
     XMVECTOR Position = info.StructPositon;
     XMFLOAT3 F3 = info.StructPickedPosition;
+    if (F3.x == -1 && F3.y == -1 && F3.z)
+    {
+        return;
+    }
     int pickedX = F3.x;
     int pickedZ = F3.z;
     int pickedHeight = F3.y;
@@ -984,11 +1033,13 @@ void BrushFunc(bool held, int BrushNumber, int BrushSize)
         if (frame % 5 == 0)
         {
             g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
+            RegenerateHeightMap();
         }
         frame++;
     }
     else {
         g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
+        RegenerateHeightMap();
     }
 }
 
@@ -1062,11 +1113,63 @@ void SmoothBrush(bool held, int BrushSize)
         static int frame = 0;
         if (frame % 5 == 0) {
             g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
+            RegenerateHeightMap();
         }
         frame++;
     }
     else {
         g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
+        RegenerateHeightMap();
+    }
+}
+
+void ColourBrush(bool held, int BrushSize)
+{
+    brushReturn info = RaycastBrush();
+    XMVECTOR Position = info.StructPositon;
+    XMFLOAT3 F3 = info.StructPickedPosition;
+    XMVECTOR rayDirection = info.RayDirection;
+    XMVECTOR rightDirection = XMVector3Cross(rayDirection, XMVectorSet(0, 1, 0, 0)); // Correct cross product
+
+    int pickedX = F3.x;
+    int pickedZ = F3.z;
+    float size = g_GameObject.GetSize();
+
+    std::vector<XMFLOAT3> addVector;
+
+    for (int dx = -BrushSize; dx <= BrushSize; dx++) {
+        for (int dz = -BrushSize; dz <= BrushSize; dz++) {
+            int nx = pickedX + dx;
+            int nz = pickedZ + dz;
+
+            // Check bounds
+            if (nx >= 0 && nx < size && nz >= 0 && nz < size) {
+                XMVECTOR vertexPos = XMVectorSet(nx, g_GameObject.GetHeight(nx, nz), nz, 1);
+
+                // Project onto the brush plane
+                XMVECTOR offset = vertexPos - XMLoadFloat3(&F3);
+                float vx = XMVectorGetX(XMVector3Dot(offset, rightDirection));
+                float vz = XMVectorGetX(XMVector3Dot(offset, rayDirection));
+
+                // Check if within the brush circle
+                if (vx * vx + vz * vz <= BrushSize * BrushSize) {
+                    g_GameObject.SetColour(nx, nz, b_Colour);
+                }
+            }
+        }
+    }
+    // Clean up and rebuild the mesh
+    if (held) {
+        static int frame = 0;
+        if (frame % 5 == 0) {
+            g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
+            RegenerateHeightMap();
+        }
+        frame++;
+    }
+    else {
+        g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
+        RegenerateHeightMap();
     }
 }
 //--------------------------------------------------------------------------------------
@@ -1225,14 +1328,14 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
     return 0;
 }
 
-void OpenFileDialog(bool imgObj) {
+bool OpenFileDialog(bool imgObj) {
     nfdchar_t* outPath = NULL;
     const nfdchar_t* filterList;
     if (imgObj) {
         filterList = "png,jpg";
     }
     else if (!imgObj) {
-        filterList = "obj";
+        filterList = "ply";
     }
     nfdresult_t result = NFD_OpenDialog(filterList, NULL, &outPath);
 
@@ -1240,16 +1343,20 @@ void OpenFileDialog(bool imgObj) {
         std::cout << "Selected file: " << outPath << std::endl;
         SaveLocation = (string)outPath;
         free(outPath);
+        return true;
     }
     else if (result == NFD_CANCEL) {
         std::cout << "User pressed cancel." << std::endl;
+        return false;
     }
     else {
         std::cout << "Error: " << NFD_GetError() << std::endl;
+        return false;
     }
+    return false;
 }
 
-void OpenFolderDialog() {
+bool OpenFolderDialog() {
     nfdchar_t* outPath = NULL;
 
     nfdresult_t result = NFD_PickFolder(NULL, &outPath);
@@ -1257,16 +1364,209 @@ void OpenFolderDialog() {
     if (result == NFD_OKAY) {
         std::cout << "Selected file: " << outPath << std::endl;
         SaveLocation = (string)outPath;
+        return true;
         free(outPath);
     }
     else if (result == NFD_CANCEL) {
         std::cout << "User pressed cancel." << std::endl;
+        return false;
     }
     else {
         std::cout << "Error: " << NFD_GetError() << std::endl;
+        return false;
+    }
+    return false;
+}
+
+void LoadTerrain() {
+    ifstream myfile;
+    myfile.open(SaveLocation, ios::in);
+    if (!myfile.fail())
+    {
+        std::vector<std::vector<float>> map;
+        std::vector<std::vector<XMFLOAT3>> colourMap;
+    	string line;
+        bool start = false;
+        bool vertex = false;
+        bool index = false;
+        int vertexCount;
+        int vertexIndex = 0;
+        int squareNum;
+
+        while (getline(myfile, line)) {
+            if (!start && !line.empty() && line == "end_header")
+            {
+                start = true;
+            }
+            if (!start && !line.empty() && line[0] == 'e' && line[8] == 'v')
+            {
+                sscanf(line.c_str(), "element vertex %i", &vertexCount);
+                squareNum = sqrt(vertexCount);
+                map = std::vector<std::vector<float>>(squareNum, std::vector<float>(squareNum, 0.0f));
+                colourMap = std::vector<std::vector<XMFLOAT3>>(squareNum, std::vector<XMFLOAT3>(squareNum, XMFLOAT3(0, 0, 0)));
+            }
+            if (start && vertexIndex <= vertexCount && !line.empty() && line != "end_header") {
+                XMFLOAT3 vertex;
+                XMFLOAT3 normal;
+                XMINT3 colour;
+                sscanf(line.c_str(), "%f %f %f %f %f %f %i %i %i %i", &vertex.x, &vertex.y, &vertex.z, &normal.x, &normal.y, &normal.z, &colour.x, &colour.y, &colour.z, &normal.x);
+                map[vertex.x][vertex.z] = vertex.y;
+                colourMap[vertex.x][vertex.z] = XMFLOAT3(((float)colour.x) / 255, ((float)colour.y) / 255, ((float)colour.z) / 255);
+                //OutputDebugStringA((to_string(vertices[vertIndex].Pos.x) + " ").c_str());
+                //OutputDebugStringA((to_string(vertices[vertIndex].Pos.y) + " ").c_str());
+                //OutputDebugStringA((to_string(vertices[vertIndex].Pos.z)+"\n").c_str());
+                vertexIndex++;
+                continue;
+            }
+            if (start && vertexIndex > vertexCount) {
+                g_GameObject.loadTerrain(&map, &colourMap, squareNum);
+                g_pCamera->SetDistance(squareNum);
+                g_pCamera->SetTarget(XMFLOAT3(squareNum / 2, squareNum / 2, squareNum / 2));
+                g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
+                g_GameObject.draw(g_pImmediateContext);
+                RegenerateHeightMap();
+                loadedModel = true;
+                TerrainGenerationMode = 2;
+                return;
+            }
+        }
     }
 }
 
+void LoadPNG() {
+    std::wstring wSaveLocation = std::wstring(SaveLocation.begin(), SaveLocation.end());
+    DirectX::ScratchImage image;
+    HRESULT hr = DirectX::LoadFromWICFile(wSaveLocation.c_str(), DirectX::WIC_FLAGS_NONE, nullptr, image);
+    if (FAILED(hr))
+    {
+        // Handle the error (e.g., log it)
+        std::wcerr << L"Failed to load image from file: " << wSaveLocation << std::endl;
+        return;
+    }
+
+    const DirectX::TexMetadata metadata = image.GetMetadata();
+    const DirectX::Image* img = image.GetImage(0, 0, 0);
+
+    D3D11_TEXTURE2D_DESC texDesc = {};
+    texDesc.Width = metadata.width;
+    texDesc.Height = metadata.height;
+    texDesc.MipLevels = static_cast<UINT>(metadata.mipLevels);
+    texDesc.ArraySize = static_cast<UINT>(metadata.arraySize);
+    texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    texDesc.SampleDesc.Count = 1;
+    texDesc.Usage = D3D11_USAGE_STAGING;
+    texDesc.BindFlags = 0;
+    texDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+
+    // Create the texture
+    D3D11_SUBRESOURCE_DATA initData = {};
+    initData.pSysMem = img->pixels;
+    initData.SysMemPitch = static_cast<UINT>(img->rowPitch);
+    initData.SysMemSlicePitch = static_cast<UINT>(img->slicePitch);
+
+    ID3D11Texture2D* stagingTexture;
+    if (n_backTexture)
+    {
+        n_backTexture->Release();
+        n_backTexture = nullptr;
+    }
+
+    hr = g_pd3dDevice->CreateTexture2D(&texDesc, &initData, &stagingTexture);
+    if (FAILED(hr)) {
+        std::wcerr << L"Failed to create texture. HRESULT: " << hr << std::endl;
+        return;
+    }
+
+    D3D11_TEXTURE2D_DESC texDescReal = texDesc;
+    texDescReal.Usage = D3D11_USAGE_DEFAULT; // Usage must be default for rendering
+    texDescReal.CPUAccessFlags = 0; // No CPU access required for rendering
+    texDescReal.BindFlags = D3D11_BIND_SHADER_RESOURCE; // Binding for shader resource
+
+    hr = g_pd3dDevice->CreateTexture2D(&texDescReal, &initData, &n_backTexture);
+    if (FAILED(hr)) {
+        std::wcerr << L"Failed to create texture. HRESULT: " << hr << std::endl;
+        return;
+    }
+
+    D3D11_MAPPED_SUBRESOURCE mappedResource;
+    hr = g_pImmediateContext->Map(stagingTexture, 0, D3D11_MAP_READ, 0, &mappedResource);
+    if (FAILED(hr))
+    {
+        std::wcerr << L"Failed to map texture for reading. HRESULT: " << hr << std::endl;
+        return;
+    }
+
+
+    void* pixelData = mappedResource.pData;
+    int width = texDesc.Width;
+    int height = texDesc.Height;
+
+    std::swap(n_frontTexture, n_backTexture);
+
+    std::vector<std::vector<float>> map(height, std::vector<float>(width));
+
+    for (int x = 0; x < height; x++) {
+        unsigned char* rowStart = static_cast<unsigned char*>(pixelData) + x * mappedResource.RowPitch;
+        for (int y = 0; y < width; y++) {
+            unsigned char r = rowStart[y * 4];     // Red channel (assumes RGBA 8-bit format)
+            unsigned char g = rowStart[y * 4 + 1]; // Green channel
+            unsigned char b = rowStart[y * 4 + 2]; // Blue channel
+
+            int colour = (r + g + b) / 3; // Average RGB
+            map[x][y] = RatioValueConverter(0, 255, n_floor, n_height, colour);
+        }
+    }
+    g_GameObject.noiseGenerateTerrain(&map, height);
+    g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
+    map.clear();
+    map.shrink_to_fit();
+    loadedModel = true;
+    n_PerlinOn = false;
+    n_SimplexOn = false;
+    n_CellularOn = false;
+    TerrainGenerationMode = 2;
+}
+
+void EditLoadedModel(int option) {
+    int size = g_GameObject.GetSize();
+    float low = 0;
+    float high = 0;
+    for (int x = 0; x < size; x++) {
+        for (int y = 0; y < size; y++)
+        {
+            if (g_GameObject.GetHeight(x, y) > high) { high = g_GameObject.GetHeight(x, y); }
+            else if (g_GameObject.GetHeight(x, y) < low) { low = g_GameObject.GetHeight(x, y); }
+        }
+    }
+    
+    if (option == 2)
+    {
+        for (int x = 0; x < size; x++) {
+            for (int y = 0; y < size; y++)
+            {
+                float height = RatioValueConverter(low, high, 0, n_height, g_GameObject.GetHeight(x, y));
+                g_GameObject.SetHeight(x, y, height);
+                if (g_GameObject.GetHeight(x, y) <= n_floor) {
+                    g_GameObject.SetHeight(x, y, n_floor);
+                }
+            }
+        }
+    }
+    if (option == 3)
+    {
+        for (int x = 0; x < size; x++) {
+            for (int y = 0; y < size; y++)
+            {
+                if (g_GameObject.GetHeight(x, y) <= n_floor) {
+                    g_GameObject.SetHeight(x, y, n_floor);
+                }
+            }
+        }
+    }
+    g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
+    g_GameObject.draw(g_pImmediateContext);
+    RegenerateHeightMap();
+}
 void setupLightForRender()
 {
     Light light;
@@ -1319,21 +1619,48 @@ float calculateDeltaTime()
 
 void saveTerrain()
 {
-    std::string fileName = std::string(s_fileName) + ".obj";
+    std::string fileName = std::string(s_modelFileName) + ".ply";
     ofstream myfile(SaveLocation+"\\"+fileName);
     int CountVertices = 0;
     int CountIndices = 0;
     int IndexCount = g_GameObject.GetIndexCount();
+    int VertexCount = g_GameObject.GetVertexCount();
+    std::vector<std::vector<XMFLOAT3>>* CM = g_GameObject.GetColourMap();
     SimpleVertex* SV = g_GameObject.GetVertices();
     DWORD* Faces = g_GameObject.GetIndices();
     int size = g_GameObject.GetSize();
     std::ostringstream output;
+    myfile << "ply\n";
+    myfile << "format ascii 1.0\n";
+    myfile << "element vertex " << VertexCount << "\n";
+    myfile << "property float x\n";
+    myfile << "property float y\n";
+    myfile << "property float z\n";
+    myfile << "property float nx\n";
+    myfile << "property float ny\n";
+    myfile << "property float nz\n";
+    myfile << "property uchar red\n";
+    myfile << "property uchar blue\n";
+    myfile << "property uchar green\n";
+    myfile << "property uchar alpha\n";
+    myfile << "element face " << IndexCount/3 << "\n";
+    myfile << "property list uchar int vertex_indices\n";
+    myfile << "end_header\n";
+
     if (myfile)
     {
-        for (int i = 0; i < size * size; ++i) {
-            output << "v " << SV[i].Pos.x << " " << SV[i].Pos.y << " " << SV[i].Pos.z << "\n";
-            output << "vn " << SV[i].Normal.x << " " << SV[i].Normal.y << " " << SV[i].Normal.z << "\n";
+        int x = 0;
+        int y = 0;
+        for (int i = 0; i < VertexCount; ++i) {
 
+            output << SV[i].Pos.x << " " << SV[i].Pos.y << " " << SV[i].Pos.z << " " << SV[i].Normal.x << " " << SV[i].Normal.y << " " << SV[i].Normal.z << " " << static_cast<int>((*CM)[x][y].x * 255) << " " << static_cast<int>((*CM)[x][y].y * 255) << " " << static_cast<int>((*CM)[x][y].z * 255) << " " << 255 << "\n";
+
+            y++;
+            if (y >= size)
+            {
+                y = 0;
+                x++;
+            }
             if ((i + 1) % 1000 == 0) {  // Flush every 1,000 vertices
                 myfile << output.str();
                 output.str("");
@@ -1347,7 +1674,7 @@ void saveTerrain()
             output.clear();
         }
         for (int i = 0; i < IndexCount; i += 3) {
-            output << "f " << Faces[i] + 1 << " " << Faces[i + 1] + 1 << " " << Faces[i + 2] + 1 << "\n";
+            output << 3 << " " << Faces[i] << " " << Faces[i + 1] << " " << Faces[i + 2] << "\n";
 
             if ((i + 3) % 1000 == 0) {  // Flush every 1,000 faces
                 myfile << output.str();
@@ -1362,6 +1689,15 @@ void saveTerrain()
             output.clear();
         }
     }
+}
+
+void saveImage()
+{
+    std::string fileName = SaveLocation + "\\" + std::string(s_imageFileName) + ".png";
+    std::wstring wFileName(fileName.begin(), fileName.end());
+    DirectX::ScratchImage image;
+    DirectX::CaptureTexture(g_pd3dDevice, g_pImmediateContext, n_frontTexture, image);
+    DirectX::SaveToWICFile(*image.GetImages(), DirectX::WIC_FLAGS_NONE, GUID_ContainerFormatPng, wFileName.c_str());
 }
 
 static void HelpMarker(const char* desc)
@@ -1393,7 +1729,8 @@ void DSGUI() {
         float temp = (pow(2, t_detail) + 1) / 2;
         g_pCamera->SetTarget(XMFLOAT3(temp, temp, temp));
         g_pCamera->SetDistance(temp * 5);
-        g_GameObject.generateTerrain();
+        g_GameObject.generateTerrain(n_pixels, n_backTexture, g_pd3dDevice);
+        std::swap(n_frontTexture, n_backTexture);
         g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
     }
     HelpMarker("Generates the terrain with a random seed using the detail and roughness value.");
@@ -1405,7 +1742,7 @@ void DSGUI() {
 
 void HydroErosionGUI() {
     ImGui::SetNextWindowSizeConstraints(ImVec2(UIWidthL * 0.9 * ScaleX, 80 * ScaleY), ImVec2(UIWidthL * ScaleX, 1500 * ScaleY));
-    ImGui::SetNextWindowPos(ImVec2((10) * ScaleX, 10 * ScaleY));
+    ImGui::SetNextWindowPos(ImVec2((10) * ScaleX, 10 * ScaleY + height));
     ImGui::Begin("Hydraulic Erosion", 0, ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::SetNextItemWidth(SliderWidth * ScaleX);
     ImGui::SliderInt("Cycles", &h_cycles, 2000, 200000);
@@ -1436,203 +1773,80 @@ void HydroErosionGUI() {
         g_GameObject.hydraulicErosion(h_cycles);
         g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
     }
-    height = ImGui::GetWindowHeight();
-    width = ImGui::GetWindowWidth();
+    height += ImGui::GetWindowHeight();
     ImGui::End();
 }
 
-void NoiseGUI() {
-    ImGui::SetNextWindowSizeConstraints(ImVec2(UIWidthL * ScaleX, 300 * ScaleY), ImVec2(UIWidthL * ScaleX, 1500 * ScaleY));
-    ImGui::SetNextWindowPos(ImVec2(10 * ScaleX, 10 * ScaleY + (int)height));
-    ImGui::Begin("Noise", 0, ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::Text("General Noise Parameters");
-    ImGui::SetNextItemWidth(SliderWidth * ScaleX);
-    if (ImGui::SliderInt("Size", &n_resolution, 32, 2048))
-    {
-        GenerateNoiseImageAndTerrain(TRUE, TRUE);
-    }
-    HelpMarker("Size of the noise generated, the number is the width and depth of the terrain.");
-    ImGui::SetNextItemWidth(SliderWidth * ScaleX);
-    if (ImGui::SliderFloat("Redistribution", &n_Exponent, 0.01f, 10.0f))
-    {
-        GenerateNoiseImageAndTerrain(FALSE, TRUE);
-
-    }
-    HelpMarker("Redistributes the terrain");
-    ImGui::SetNextItemWidth(SliderWidth * ScaleX);
-    if (ImGui::SliderFloat("Height", &n_height, 1, 1024))
-    {
-        GenerateNoiseImageAndTerrain(FALSE, TRUE);
-
-    }
-    HelpMarker("The height of the noise terrain");
-    ImGui::SetNextItemWidth(SliderWidth * ScaleX);
-    if (ImGui::SliderFloat("Floor/Sea Level", &n_floor, 0, 1023))
-    {
-        GenerateNoiseImageAndTerrain(FALSE, TRUE);
-
-    }
-    HelpMarker("The height value for the floor of the terrain");
-    ImGui::Text("\nNoise Specific Options");
-    ImGui::Text("\nPerlin Noise Parameters");
-    ImGui::SetNextItemWidth(SliderWidth * ScaleX);
-    if (ImGui::Checkbox("P Enabled", &n_PerlinOn))
-    {
-        GenerateNoiseImageAndTerrain(TRUE, TRUE);
-    };
-    HelpMarker("Enables perlin noise");
-    if (n_PerlinOn) {
-        ImGui::SetNextItemWidth(SliderWidth * ScaleX);
-        if (ImGui::SliderInt("P Octaves", &n_PerlinOctaves, 1, 5)) {
-            GenerateNoiseImageAndTerrain(TRUE, TRUE);
-        }
-        HelpMarker("Layers noise at different scales over eachother, more octaves more detailed looking terrain");
-        if (ImGui::Button("New P Seed"))
-        {
-            n_Perlin.SetSeed(RandomSeed());
-            GenerateNoiseImageAndTerrain(TRUE, TRUE);
-        }
-        HelpMarker("Generates a new noise seed, changes how the noise looks");
-        ImGui::SetNextItemWidth(SliderWidth * ScaleX);
-        if (ImGui::SliderFloat("P Intensity", &n_PerlinWeight, 0.01f, 1.0f))
-        {
-            GenerateNoiseImageAndTerrain(TRUE, TRUE);
-        }
-        HelpMarker("Controls how much this noise affects height when other noise is enabled");
-        ImGui::SetNextItemWidth(SliderWidth * ScaleX);
-
-        if (ImGui::SliderFloat("P Scale", &n_PerlinFrequency, 0.001f, 0.1f))
-        {
-            n_Perlin.SetFrequency(n_PerlinFrequency);
-            GenerateNoiseImageAndTerrain(TRUE, TRUE);
-        }
-        HelpMarker("The resolution of the noise, lower is a smaller map, higher is a bigger map");
-    }
-
-    ImGui::Text("");
-    ImGui::Text("Simplex Noise Parameters");
-    if (ImGui::Checkbox("S Enabled", &n_SimplexOn))
-    {
-        GenerateNoiseImageAndTerrain(TRUE, TRUE);
-    };
-    HelpMarker("Enables simplex noise");
-
-    if (n_SimplexOn) {
-        ImGui::SetNextItemWidth(SliderWidth * ScaleX);
-        if (ImGui::SliderInt("S Octaves", &n_SimplexOctaves, 1, 5)) 
-        {
-            GenerateNoiseImageAndTerrain(TRUE, TRUE);
-        };
-        HelpMarker("Layers noise at different scales over eachother, more octaves more detailed looking terrain");
-        if (ImGui::Button("New S Seed"))
-        {
-            n_Simplex.SetSeed(RandomSeed()); 
-            GenerateNoiseImageAndTerrain(TRUE, TRUE);
-        }
-        HelpMarker("Generates a new noise seed, changes how the noise looks");
-        ImGui::SetNextItemWidth(SliderWidth * ScaleX);
-
-        if (ImGui::SliderFloat("S Intensity", &n_SimplexWeight, 0.01f, 1.0f))
-        {
-            GenerateNoiseImageAndTerrain(TRUE, TRUE);
-        }
-        HelpMarker("Controls how much this noise affects height when other noise is enabled");
-        ImGui::SetNextItemWidth(SliderWidth * ScaleX);
-
-        if (ImGui::SliderFloat("S Scale", &n_SimplexFrequency, 0.001f, 0.1f))
-        {
-            n_Simplex.SetFrequency(n_SimplexFrequency);
-            GenerateNoiseImageAndTerrain(TRUE, TRUE);
-        }
-        HelpMarker("The resolution of the noise, lower is a smaller map, higher is a bigger map");
-    }
-
-    ImGui::Text("");
-    ImGui::Text("Cellular Noise Parameters");
-    if (ImGui::Checkbox("C Enabled", &n_CellularOn))
-    {
-        GenerateNoiseImageAndTerrain(TRUE, TRUE);
-    };
-    HelpMarker("Enables cellular noise");
-    if (n_CellularOn) {
-        ImGui::SetNextItemWidth(SliderWidth * ScaleX);
-        if (ImGui::SliderInt("C Octaves", &n_CellularOctaves, 1, 5)) 
-        {
-            GenerateNoiseImageAndTerrain(TRUE, TRUE);
-        };
-        HelpMarker("Layers noise at different scales over eachother, more octaves more detailed looking terrain");
-        if (ImGui::Button("New C Seed"))
-        {
-            n_Cellular.SetSeed(RandomSeed());
-            GenerateNoiseImageAndTerrain(TRUE, TRUE);
-        }
-        HelpMarker("Generates a new noise seed, changes how the noise looks");
-        ImGui::SetNextItemWidth(SliderWidth* ScaleX);
-
-        if (ImGui::SliderFloat("C Intensity", &n_CellularWeight, 0.01f, 1.0f))
-        {
-            GenerateNoiseImageAndTerrain(TRUE, TRUE);
-        }
-        HelpMarker("Controls how much this noise affects height when other noise is enabled");
-        ImGui::SetNextItemWidth(SliderWidth * ScaleX);
-
-        if (ImGui::SliderFloat("C Scale", &n_CellularFrequency, 0.001f, 0.1f))
-        {
-            n_Cellular.SetFrequency(n_CellularFrequency);
-            GenerateNoiseImageAndTerrain(TRUE, TRUE);
-        };
-        HelpMarker("The resolution of the noise, lower is a smaller map, higher is a bigger map");
-    }
-    ImGui::Text("");
-    if (ImGui::Button("Regenerate Noise"))
-    {
-        GenerateNoiseImageAndTerrain(true, true);
-    }
-    HelpMarker("Incase of mistakes this will reset the noise to how it was before you changed it with the brushes or hydraulic erosion.");
-    ImGui::End();
-}
-
-void NoiseImage() {
-    ImGui::SetNextWindowPos(ImVec2((10 + width) * ScaleX , 10 * ScaleY));
-    ImGui::Begin("Noise Image", 0, ImGuiWindowFlags_AlwaysAutoResize);
-    HelpMarker("Noise represented as an image");
+void HeightMapImage() {
+    ImGui::SetNextWindowPos(ImVec2((10 * ScaleX + width)  , 10 * ScaleY));
+    ImGui::Begin("Height Map Image", 0, ImGuiWindowFlags_AlwaysAutoResize);
+    HelpMarker("Height values represented as an image");
     ImGui::SetNextItemWidth(50 * ScaleX);
     ImGui::SliderInt("Image Size", &n_imageSize, 50, 500);
-    ImGui::Image((ImTextureID)(intptr_t)n_texture, ImVec2(n_imageSize * ScaleX, n_imageSize * ScaleY));
+    if (n_frontTexture) {
+        if (n_texture)
+        {
+            n_texture->Release();
+            n_texture = nullptr;
+        }
+        D3D11_SHADER_RESOURCE_VIEW_DESC srvd = {};
+        srvd.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        srvd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+        srvd.Texture2D.MipLevels = 1;
+
+        HRESULT hr = g_pd3dDevice->CreateShaderResourceView(n_frontTexture, &srvd, &n_texture);
+        if (FAILED(hr))
+        {
+            std::wcout << L"Shader Resource View is null!" << std::endl;
+        }
+
+        ImGui::Image((ImTextureID)(intptr_t)n_texture, ImVec2(n_imageSize * ScaleX, n_imageSize * ScaleY));
+
+    }
+
     ImGui::End();
 }
 
 void File() {
-    ImGui::SetNextWindowSizeConstraints(ImVec2(UIWidthR * ScaleX, 80 * ScaleY), ImVec2(UIWidthR * ScaleX, 90 * ScaleY));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(UIWidthR * ScaleX, 80 * ScaleY), ImVec2(UIWidthR * ScaleX, 200 * ScaleY));
     ImGui::SetNextWindowPos(ImVec2(screenWidth - (10 + UIWidthR) * ScaleX, 10 * ScaleY));
     ImGui::Begin("File", 0, ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::SetNextItemWidth(180*ScaleX);
-    ImGui::InputText("File Name", s_fileName, 32);
-    if (ImGui::Button("Load obj file"))
+    ImGui::SetNextItemWidth(120*ScaleX);
+    ImGui::InputText("Terrain File Name", s_modelFileName, 32);
+    ImGui::SetNextItemWidth(120 * ScaleX);
+    ImGui::InputText("Height Map File Name", s_imageFileName, 32);
+    if (ImGui::Button("Load PLY file"))
     {
-        OpenFileDialog(false);
+        if (OpenFileDialog(false)) { LoadTerrain(); }
     }
-    if (ImGui::Button("Load height map image"))
+    HelpMarker("Loads a .ply file into the tool.");
+    if (ImGui::Button("Load Height Map Image"))
     {
-        OpenFileDialog(true);
-
+        if(OpenFileDialog(true)) { LoadPNG(); }
     }
-    if (ImGui::Button("Export"))
+    HelpMarker("Loads a png height map (might work with other formats) into the tool and creates a terrain from it.");
+    if (ImGui::Button("Export Height Map"))
     {
-        OpenFolderDialog();
-        saveTerrain();
+        if (OpenFolderDialog()) { saveImage(); }
+        
     }
-    HelpMarker("Exports the file in the programs file location");
+    HelpMarker("Exports height map as png");
+    if (ImGui::Button("Export Terrain"))
+    {
+        if(OpenFolderDialog()) { saveTerrain(); }
+        
+    }
+    HelpMarker("Exports terrain as ply file");
     height = ImGui::GetWindowHeight();
     width = ImGui::GetWindowWidth();
     ImGui::End();
 }
 
 void Intro() {
-    ImGui::SetNextWindowSizeConstraints(ImVec2((UIWidthR + 30) * ScaleX, 80 * ScaleY), ImVec2((UIWidthR+30) * ScaleX, 400 * ScaleY));
-    ImGui::SetNextWindowPos(ImVec2(screenWidth - (10 + UIWidthR + UIWidthR + 30) * ScaleX, 10 * ScaleY));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(UIWidthL * 0.9 * ScaleX, 80 * ScaleY), ImVec2(UIWidthL * ScaleX, 1500 * ScaleY));
+    ImGui::SetNextWindowPos(ImVec2(10*ScaleX,10*ScaleY));
     ImGui::Begin("Information", 0, ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::TextWrapped("This is a terrain generation tool. The two terrain generation modes Diamond Square and noise do not currently work together.\n\nCamera movement, right click will rotate the camera around the centre point, and press Control + Left Click to move the rotation point. And to zoom in and out you use the scroll wheel.\n\nTo directly edit slider values you can Control + Left Click on the sliders to access the value entry mode \n\nClick the arrow at the top of this window to minimize this text.");
+    ImGui::TextWrapped("This is a terrain generation tool. The two terrain generation modes Diamond Square and noise.\n\nCamera movement, right click will rotate the camera around the centre point, and press Control + Left Click to move the centre point, to reset there is a button in view on the right hand side. And to zoom in and out you use the scroll wheel.\n\nTo directly edit slider values you can Control + Left Click on the sliders to access the value entry mode\n\n You can load in a heightmap and ply model (only ones created from this tool for now) through the menu on the right along with exporting them. When loading into the tool you can adjust the model with the height slider but to start generating new models you will need to turn off the loaded model checkbox.\n\nClick the arrow at the top of this window to minimize this window.");
     if (ImGui::Button("Showcase terrain values")) {
         n_PerlinOctaves = 5;
         n_Exponent = 4.861f;
@@ -1640,6 +1854,8 @@ void Intro() {
         n_PerlinFrequency = 0.007f;
         GenerateNoiseImageAndTerrain(true, true);
     }
+    height = ImGui::GetWindowHeight();
+    width = ImGui::GetWindowWidth();
     ImGui::End();
 }
 
@@ -1650,10 +1866,17 @@ void View() {
     ImGui::Text("Camera:");
     ImGui::Text("Position: %.2f, %.2f, %.2f", g_pCamera->GetPosition().x, g_pCamera->GetPosition().y, g_pCamera->GetPosition().z);
     ImGui::Text("Rotation Point: %.2f, %.2f, %.2f", g_pCamera->GetTarget().x, g_pCamera->GetTarget().y, g_pCamera->GetTarget().z);
+    if (ImGui::Button("Reset Camera Rotation Position"))
+    {
+        float temp = g_GameObject.GetSize()/2;
+        g_pCamera->SetTarget(XMFLOAT3(temp, temp, temp));
+        g_pCamera->SetDistance(temp * 3);
+    }
+    HelpMarker("Resets Camera Position to center of terrain.");
     ImGui::SetNextItemWidth(150);
-    ImGui::SliderFloat("CTRL+LCLICK Sens", &c_sensitivity, 0.05, 1.0f);
+    ImGui::SliderFloat("CTRL+LCLICK Sens", &c_sensitivity, 0.05f, 4.0f);
     ImGui::SetNextItemWidth(150);
-    ImGui::SliderFloat("Zoom Sens", &c_zoomSens, 0.01, 1.0);
+    ImGui::SliderFloat("Zoom Sens", &c_zoomSens, 0.01f, 4.0f);
     ImGui::Text("Model Data:");
     ImGui::Text("Vertex Count: %i", g_GameObject.GetVertexCount());
     ImGui::Text("Face Count: %i", g_GameObject.GetIndexCount()/3);
@@ -1669,14 +1892,18 @@ void Brush()
     ImGui::SetNextWindowPos(ImVec2(screenWidth - (10 + UIWidthR) * ScaleX, 10 * ScaleY + height));
     ImGui::Begin("Terrain Brush", 0, ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::Checkbox("Flatten Brush Enabled", &b_FlatBool);
-    HelpMarker("Enables the flatten brush so it flattens on left click");
+    HelpMarker("Enables the flatten brush so it flattens on left click and drag left click");
     if (b_FlatBool)
     {
+        b_RaiseBool = false;
+        b_SmoothBool = false;
+        b_ColourBool = false;
+        b_LowerBool = false;
         ImGui::SetNextItemWidth(120 * ScaleX);
         ImGui::InputInt("Flatten Size", &b_FlatSize);
         HelpMarker("Changes the size of the brush so the bigger the value the bigger the area it flattens");
         ImGui::SetNextItemWidth(120 * ScaleX);
-        ImGui::InputFloat("Max Height Diff", &b_MaxFlatDifference);
+        ImGui::SliderFloat("Max Height Diff", &b_MaxFlatDifference, 0.1f, 200.0f);
         HelpMarker("The maximum difference in the picked height and the surrounding height that will get flattened");
         ImGui::SetNextItemWidth(120 * ScaleX);
         ImGui::SliderFloat("Smoothness", &b_SmoothnessFactor, 0.0f, 1.0f);
@@ -1684,61 +1911,88 @@ void Brush()
     }
 
     ImGui::Checkbox("Raise Brush Enabled", &b_RaiseBool);
-    HelpMarker("TBD");
+    HelpMarker("Enables the Raise brush so it Raises/Extrudes on left click and drag left click");
     if (b_RaiseBool)
     {
+        b_FlatBool = false;
+        b_SmoothBool = false;
+        b_ColourBool = false;
+        b_LowerBool = false;
         ImGui::SetNextItemWidth(120 * ScaleX);
         ImGui::InputInt("Raise Size", &b_RaiseSize);
-        HelpMarker("TBD");        
+        HelpMarker("Size of brush");
         ImGui::SetNextItemWidth(120 * ScaleX);
-        ImGui::InputFloat("Raise Rate", &b_RaiseRate);
-        HelpMarker("TBD");
+        ImGui::SliderFloat("Raise Rate", &b_RaiseRate, 0.0f, 10.0f);
+        HelpMarker("The rate of added height");
         ImGui::SetNextItemWidth(120 * ScaleX);
-        ImGui::InputFloat("Raise Strength", &b_RaiseStrength);
-        HelpMarker("TBD");
+        ImGui::SliderFloat("Raise Strength", &b_RaiseStrength, 0.01f, 1.0f);
+        HelpMarker("How spread out the raise brush is, 0 raise less further from the center, 1.0 adds to all points equally.");
     }
 
     ImGui::Checkbox("Lower Brush Enabled", &b_LowerBool);
-    HelpMarker("TBD");
+    HelpMarker("Enables the Lower brush so it Lowers on left click and drag left click");
     if (b_LowerBool)
     {
+        b_RaiseBool = false;
+        b_SmoothBool = false;
+        b_ColourBool = false;
+        b_FlatBool = false;
         ImGui::SetNextItemWidth(120 * ScaleX);
         ImGui::InputInt("Lower Size", &b_RaiseSize);
-        HelpMarker("TBD");
+        HelpMarker("Size of brush");
         ImGui::SetNextItemWidth(120 * ScaleX);
-        ImGui::InputFloat("Lower Rate", &b_LowerRate);
-        HelpMarker("TBD");
+        ImGui::SliderFloat("Lower Rate", &b_LowerRate, 0.0f, 10.0f);
+        HelpMarker("The rate of detracted height");
         ImGui::SetNextItemWidth(120 * ScaleX);
-        ImGui::InputFloat("Lower Strength", &b_RaiseStrength);
-        HelpMarker("TBD");
+        ImGui::SliderFloat("Lower Strength", &b_RaiseStrength, 0.01f, 1.0f);
+        HelpMarker("How spread out the lower brush is, 0 lowers less further from the center, 1.0 lowers all points equally.");
     }
 
     ImGui::Checkbox("Smooth Brush Enabled", &b_SmoothBool);
-    HelpMarker("TBD");
+    HelpMarker("Enables the Smooth brush so it Smooths on left click and drag left click");
     if (b_SmoothBool)
     {
+        b_RaiseBool = false;
+        b_FlatBool = false;
+        b_ColourBool = false;
+        b_LowerBool = false;
         ImGui::SetNextItemWidth(120 * ScaleX);
         ImGui::InputInt("Smooth Size", &b_SmoothSize);
-        HelpMarker("TBD");
+        HelpMarker("Size of brush");
         ImGui::SetNextItemWidth(120 * ScaleX);
-        ImGui::SliderFloat("Smooth Rate", &b_SmoothRate,0, 1.0f);
-        HelpMarker("TBD");
+        ImGui::SliderFloat("Smooth Rate", &b_SmoothRate, 0.01f, 1.0f);
+        HelpMarker("How it averages heights, 0 doesnt take account any neighbors, and 1 averages all neighbors equally");
     }
-
+    
+    ImGui::Checkbox("Colour Brush Enabled", &b_ColourBool);
+    HelpMarker("Enables the Colour brush so it Colours on left click and drag left click");
+    if (b_ColourBool)
+    {
+        b_RaiseBool = false;
+        b_SmoothBool = false;
+        b_FlatBool = false;
+        b_LowerBool = false;
+        ImGui::SetNextItemWidth(120 * ScaleX);
+        ImGui::ColorPicker3("Paint Colour", &b_Colour.x);
+        ImGui::SetNextItemWidth(120 * ScaleX);
+        ImGui::InputInt("Colour Size", &b_ColourSize);
+        HelpMarker("Size of brush");
+    }
     ImGui::End();
 }
 
 void TerrainGeneration()
 {
-    ImGui::SetNextWindowSizeConstraints(ImVec2(width * ScaleX, 80 * ScaleY), ImVec2(width, 1500 * ScaleY));
-    ImGui::SetNextWindowPos(ImVec2(10 * ScaleX , (10 + height) * ScaleY));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(width, 80 * ScaleY), ImVec2(width, 1500 * ScaleY));
+    ImGui::SetNextWindowPos(ImVec2(10 * ScaleX , (10 * ScaleY + height) ));
     ImGui::Begin("Terrain Generation", 0, ImGuiWindowFlags_AlwaysAutoResize);
-    if (ImGui::Button("Diamond Square", ImVec2(ImGui::GetContentRegionAvail().x * 0.5f, 0.0f)))
+    int size = ImGui::GetContentRegionAvail().x;
+    if (ImGui::Button("Diamond Square", ImVec2(size/2, 0.0f)))
     {
         TerrainGenerationMode = 1;
     }
     ImGui::SameLine();
-    if (ImGui::Button("Noise", ImVec2(ImGui::GetContentRegionAvail().x, 0.0f)))
+    if (ImGui::Button("Noise", ImVec2(size/2, 0.0f)))
     {
         TerrainGenerationMode = 2;
     }
@@ -1756,8 +2010,9 @@ void TerrainGeneration()
             g_GameObject.setDetailRoughness(t_detail, t_roughness);
             float temp = (pow(2, t_detail) + 1) / 2;
             g_pCamera->SetTarget(XMFLOAT3(temp, temp, temp));
-            g_pCamera->SetDistance(temp * 5);
-            g_GameObject.generateTerrain();
+            g_pCamera->SetDistance(temp * 3);
+            g_GameObject.generateTerrain(n_pixels, n_backTexture, g_pd3dDevice);
+            std::swap(n_frontTexture, n_backTexture);
             g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
         }
         HelpMarker("Generates the terrain with a random seed using the detail and roughness value.");
@@ -1768,32 +2023,43 @@ void TerrainGeneration()
 
     else if (TerrainGenerationMode == 2)
     {
+
+        ImGui::Checkbox("Loaded Model", &loadedModel);
         ImGui::Text("General Noise Parameters");
         ImGui::SetNextItemWidth(SliderWidth * ScaleX);
         if (ImGui::SliderInt("Size", &n_resolution, 32, 2048))
         {
-            GenerateNoiseImageAndTerrain(TRUE, TRUE);
+            if (!loadedModel) {
+                if (n_resolution < 32) { n_resolution = 32; }
+                GenerateNoiseImageAndTerrain(TRUE, TRUE);
+            }
         }
         HelpMarker("Size of the noise generated, the number is the width and depth of the terrain.");
         ImGui::SetNextItemWidth(SliderWidth * ScaleX);
         if (ImGui::SliderFloat("Redistribution", &n_Exponent, 0.01f, 10.0f))
         {
-            GenerateNoiseImageAndTerrain(FALSE, TRUE);
-
+            if (!loadedModel) {
+                GenerateNoiseImageAndTerrain(FALSE, TRUE);
+            }
         }
         HelpMarker("Redistributes the terrain");
         ImGui::SetNextItemWidth(SliderWidth * ScaleX);
         if (ImGui::SliderFloat("Height", &n_height, 1, 1024))
         {
-            GenerateNoiseImageAndTerrain(FALSE, TRUE);
-
+            if (!loadedModel) {
+                GenerateNoiseImageAndTerrain(FALSE, TRUE);
+            }
+            else if (loadedModel) {
+                EditLoadedModel(2);
+            }
         }
         HelpMarker("The height of the noise terrain");
         ImGui::SetNextItemWidth(SliderWidth * ScaleX);
-        if (ImGui::SliderFloat("Floor Heigt", &n_floor, 0, 1023))
+        if (ImGui::SliderFloat("Floor Height", &n_floor, 0, 1023))
         {
-            GenerateNoiseImageAndTerrain(FALSE, TRUE);
-
+            if (!loadedModel) {
+                GenerateNoiseImageAndTerrain(FALSE, TRUE);
+            }
         }
         HelpMarker("The height value for the floor of the terrain");
         ImGui::Text("\nNoise Specific Options");
@@ -1801,10 +2067,11 @@ void TerrainGeneration()
         ImGui::SetNextItemWidth(SliderWidth * ScaleX);
         if (ImGui::Checkbox("P Enabled", &n_PerlinOn))
         {
-            GenerateNoiseImageAndTerrain(TRUE, TRUE);
+            if (!loadedModel) { GenerateNoiseImageAndTerrain(TRUE, TRUE); }
+            
         };
         HelpMarker("Enables perlin noise");
-        if (n_PerlinOn) {
+        if (n_PerlinOn && !loadedModel) {
             ImGui::SetNextItemWidth(SliderWidth * ScaleX);
             if (ImGui::SliderInt("P Octaves", &n_PerlinOctaves, 1, 5)) {
                 GenerateNoiseImageAndTerrain(TRUE, TRUE);
@@ -1836,11 +2103,11 @@ void TerrainGeneration()
         ImGui::Text("Simplex Noise Parameters");
         if (ImGui::Checkbox("S Enabled", &n_SimplexOn))
         {
-            GenerateNoiseImageAndTerrain(TRUE, TRUE);
+            if (!loadedModel) { GenerateNoiseImageAndTerrain(TRUE, TRUE); }
         };
         HelpMarker("Enables simplex noise");
 
-        if (n_SimplexOn) {
+        if (n_SimplexOn && !loadedModel) {
             ImGui::SetNextItemWidth(SliderWidth * ScaleX);
             if (ImGui::SliderInt("S Octaves", &n_SimplexOctaves, 1, 5))
             {
@@ -1874,10 +2141,10 @@ void TerrainGeneration()
         ImGui::Text("Cellular Noise Parameters");
         if (ImGui::Checkbox("C Enabled", &n_CellularOn))
         {
-            GenerateNoiseImageAndTerrain(TRUE, TRUE);
+            if (!loadedModel) { GenerateNoiseImageAndTerrain(TRUE, TRUE); }
         };
         HelpMarker("Enables cellular noise");
-        if (n_CellularOn) {
+        if (n_CellularOn && !loadedModel) {
             ImGui::SetNextItemWidth(SliderWidth * ScaleX);
             if (ImGui::SliderInt("C Octaves", &n_CellularOctaves, 1, 5))
             {
@@ -1909,7 +2176,7 @@ void TerrainGeneration()
         ImGui::Text("");
         if (ImGui::Button("Regenerate Noise"))
         {
-            GenerateNoiseImageAndTerrain(true, true);
+            if (!loadedModel) { GenerateNoiseImageAndTerrain(TRUE, TRUE); }
         }
         HelpMarker("Incase of mistakes this will reset the noise to how it was before you changed it with the brushes or hydraulic erosion.");
     }
@@ -1919,11 +2186,11 @@ void TerrainGeneration()
 }
 
 void RenderDebugWindow(float deltaTime) {
+    Intro();
     HydroErosionGUI();
-    NoiseImage();
+    HeightMapImage();
     TerrainGeneration();
     File();
-    Intro();
     View();
     Brush();
 }
@@ -1953,6 +2220,10 @@ void Render()
             else if (b_SmoothBool)
             {
                 SmoothBrush(true, b_SmoothSize);
+            }
+            else if (b_ColourBool)
+            {
+                ColourBrush(true, b_ColourSize);
             }
         }
     }

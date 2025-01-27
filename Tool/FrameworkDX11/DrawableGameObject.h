@@ -50,8 +50,9 @@ public:
 	void								printIndicies();
 	void								printVertices();
 	void								hydraulicErosion(int cycles);
-	void								generateTerrain();
+	void								generateTerrain(uint32_t*& pixels, ID3D11Texture2D*& n_texture, ID3D11Device* pd3dDevice);
 	void								noiseGenerateTerrain(std::vector<std::vector<float>>* pMap, int size);
+	void								loadTerrain(std::vector<std::vector<float>>* pMap, std::vector<std::vector<XMFLOAT3>>* colourMap, int size);
 	float								RatioValueConverter(float old_min, float old_max, float _min, float new_max, float value);
 	SimpleVertex*						GetVertices() { return m_verticesArray; }
 	DWORD*								GetIndices() { return m_indicesArray; }
@@ -60,6 +61,9 @@ public:
 	INT									GetVertexCount() { return m_VertexCount; }
 	float GetHeight(int x, int y) { return m_map[x][y]; }
 	void SetHeight(int x, int y, float z) { m_map[x][y] = z; }
+	XMFLOAT3 GetColour(int x, int y) { return m_colourMap[x][y]; }
+	void SetColour(int x, int y, XMFLOAT3 z) { m_colourMap[x][y] = z; }
+	std::vector<std::vector<XMFLOAT3>>* GetColourMap() { return &m_colourMap; }
 	HydraulicErosion					hydraulicErosionClass;
 private:
 	
@@ -83,6 +87,7 @@ private:
 	INT									m_detail;
 	FLOAT								m_roughness;
 	std::vector<std::vector<float>>		m_map;
+	std::vector<std::vector<XMFLOAT3>> m_colourMap;
 	TerrainGenDS						newTerrain;
 };
 

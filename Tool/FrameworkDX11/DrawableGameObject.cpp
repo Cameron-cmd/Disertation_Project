@@ -17,6 +17,10 @@ DrawableGameObject::DrawableGameObject()
 	XMStoreFloat4x4(&m_World, XMMatrixIdentity());
 }
 
+float DrawableGameObject::RatioValueConverter(float old_min, float old_max, float new_min, float new_max, float value)
+{
+	return (((value - old_min) / (old_max - old_min)) * (new_max - new_min) + new_min);
+}
 
 DrawableGameObject::~DrawableGameObject()
 {
@@ -78,18 +82,91 @@ void DrawableGameObject::noiseGenerateTerrain(std::vector<std::vector<float>>* p
 	m_map.clear();
 	m_map = *pMap;
 	m_size = size - 1;
-	m_max = size - 2;
+	m_max = size - 2; 
+	m_colourMap = std::vector<std::vector<XMFLOAT3>>(m_size, std::vector<XMFLOAT3>(m_size, XMFLOAT3(0.2, 0.2, 0.2)));
+	hydraulicErosionClass.scale = m_max;
 }
 
-void DrawableGameObject::generateTerrain()
+void DrawableGameObject::loadTerrain(std::vector<std::vector<float>>* pMap, std::vector<std::vector<XMFLOAT3>>* colourMap,  int size)
+{
+	m_map.clear();
+	m_map = *pMap;
+	m_size = size - 1;
+	m_max = size - 2;
+	m_colourMap = *colourMap;
+	hydraulicErosionClass.scale = m_max;
+}
+
+void DrawableGameObject::generateTerrain(uint32_t*& pixels, ID3D11Texture2D*& n_texture, ID3D11Device* g_pd3dDevice)
 {
 	newTerrain = TerrainGenDS(m_detail);
 	newTerrain.Generate(m_roughness);
 	m_map = newTerrain._map;
 	m_size = newTerrain._size;
 	m_max = newTerrain._max;
+	m_colourMap = std::vector<std::vector<XMFLOAT3>>(m_size, std::vector<XMFLOAT3>(m_size, XMFLOAT3(0.2, 0.2, 0.2)));
 	hydraulicErosionClass.scale = m_max;
+	if (pixels) {
+		delete[] pixels;
+		pixels = nullptr;
+	}
+	pixels = new uint32_t[m_size * m_size];
+	std::memset(pixels, 0, sizeof(uint32_t) * m_size * m_size);
+	float low = 0;
+	float high = m_size;
+	for (int x = 0; x < m_size; x++) {
+		for (int y = 0; y < m_size; y++)
+		{
+			if (m_map[x][y] > high) { high = m_map[x][y]; }
+			else if (m_map[x][y] < low) { low = m_map[x][y]; }
+		}
+	}
+	
+	for (int x = 0; x < m_size; x++) {
+		for (int y = 0; y < m_size; y++)
+		{
+			int colour = RatioValueConverter(low, high, 0, 255, m_map[x][y]);
+			pixels[x + y * m_size] = colour | colour << 8 | colour << 16 | 255 << 24;
+		}
+	}
+
+	D3D11_SUBRESOURCE_DATA subrecData = {};
+	subrecData.pSysMem = pixels;
+	subrecData.SysMemPitch = m_size * sizeof(uint32_t);
+
+	D3D11_TEXTURE2D_DESC desc = {};
+	desc.Width = m_size;
+	desc.Height = m_size;
+	desc.MipLevels = desc.ArraySize = 1;
+	desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	desc.SampleDesc.Count = 1;
+	desc.Usage = D3D11_USAGE_DEFAULT;
+	desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+	HRESULT hr = g_pd3dDevice->CreateTexture2D(&desc, &subrecData, &n_texture);
+	if (FAILED(hr)) {
+		OutputDebugStringA("Failed to create texture\n");
+		delete[] pixels;
+		pixels = nullptr;
+		return;
+	}
+
+	//D3D11_SHADER_RESOURCE_VIEW_DESC srvd = {};
+	//srvd.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	//srvd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+	//srvd.Texture2D.MipLevels = 1;
+
+	//hr = g_pd3dDevice->CreateShaderResourceView(texture, &srvd, &n_texture);
+	//if (FAILED(hr)) {
+	//	texture->Release();
+	//	delete[] pixels;
+	//	pixels = nullptr;
+	//	return;
+	//}
+	//texture->Release();
+	//texture = nullptr;
 }
+
 
 void DrawableGameObject::printIndicies()
 {
@@ -103,11 +180,6 @@ void DrawableGameObject::printIndicies()
 		OutputDebugStringA((to_string(m_indicesArray[count]) + "\n").c_str());
 		count++;
 	}
-}
-
-float DrawableGameObject::RatioValueConverter(float old_min, float old_max, float new_min, float new_max, float value)
-{
-	return (((value - old_min) / (old_max - old_min)) * (new_max - new_min) + new_min);
 }
 
 HRESULT DrawableGameObject::initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceContext* pContext)
@@ -135,7 +207,7 @@ HRESULT DrawableGameObject::initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceConte
 		{
 			SimpleVertex SV;
 			SV.Pos = XMFLOAT3(x, m_map[x][y], y);
-			SV.Colour = XMFLOAT3(0.20f, 0.20f, 0.20f);
+			SV.Colour = m_colourMap[x][y];
 			m_verticesArray[count] = SV;
 			count++;
 		}
@@ -197,57 +269,6 @@ HRESULT DrawableGameObject::initMesh(ID3D11Device* pd3dDevice, ID3D11DeviceConte
 			count++;
 		}
 	}
-	//ifstream myfile;
-	//myfile.open("Resources//City1 Block 1.obj", ios::in);
-	//if (!myfile.fail())
-	//{
-	//	string line;
-	//	while (getline(myfile, line)) {
-	//		if (line[0] == 'v') { vertexCount++; }
-	//		if (line[0] == 'f') { indexCount++; indexCount++; indexCount++; }
-	//	}
-	//	line.clear();
-	//	m_IndexCount = indexCount;
-	//	vertices = new SimpleVertex[vertexCount];
-	//	m_indicesArray = new WORD[indexCount];
-	//	int vertIndex = 0;
-	//	int indIndex = 0;
-	//	float indcount = 0;
-	//	myfile.clear();                 // clear fail and eof bits
-	//	myfile.seekg(0, std::ios::beg); // back to the start!
-	//	while (getline(myfile, line)) {
-	//		if (!line.empty() && line[0] == 'v') {
-	//			XMFLOAT3 vertex;
-	//			sscanf(line.c_str(), "v %f %f %f", &vertex.x, &vertex.y, &vertex.z);
-	//			SimpleVertex SV;
-	//			SV.Pos = vertex;
-	//			SV.Normal = XMFLOAT3(0, 0, 0);
-	//			SV.TexCoord = XMFLOAT2(0, 0);
-	//			vertices[vertIndex] = SimpleVertex(SV);
-	//			//OutputDebugStringA((to_string(vertices[vertIndex].Pos.x) + " ").c_str());
-	//			//OutputDebugStringA((to_string(vertices[vertIndex].Pos.y) + " ").c_str());
-	//			//OutputDebugStringA((to_string(vertices[vertIndex].Pos.z)+"\n").c_str());
-	//			vertIndex++;
-	//			continue;
-	//		}
-	//		if (!line.empty() && line[0] == 'f') {
-	//			XMINT3 face;
-	//			sscanf(line.c_str(), "f %i %i %i", &face.x, &face.y, &face.z);
-	//			m_indicesArray[indIndex] = face.x - 1;
-	//			//OutputDebugStringA((to_string(m_indicesArray[indIndex])+" ").c_str());
-	//			indIndex++;
-	//			m_indicesArray[indIndex] = face.y - 1;
-	//			//OutputDebugStringA((to_string(m_indicesArray[indIndex]) + " ").c_str());
-	//			indIndex++;
-	//			m_indicesArray[indIndex] = face.z - 1;
-	//			//OutputDebugStringA((to_string(m_indicesArray[indIndex]) + "\n").c_str());
-	//			indIndex++;
-
-	//		}
-	//	}
-
-	//}
-	//}
 
 	D3D11_BUFFER_DESC bd = {};
 	bd.Usage = D3D11_USAGE_DEFAULT;
@@ -336,4 +357,5 @@ void DrawableGameObject::draw(ID3D11DeviceContext* pContext)
 	pContext->PSSetSamplers(0, 1, &m_pSamplerLinear);
 
 	pContext->DrawIndexed(m_IndexCount, 0, 0);
+	pContext->Flush();
 }
