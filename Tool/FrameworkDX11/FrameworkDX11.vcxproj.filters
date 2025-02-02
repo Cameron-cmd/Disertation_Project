@@ -4,10 +4,6 @@
     <FxCompile Include="shader.fx" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Camera.cpp" />
-    <ClCompile Include="DDSTextureLoader.cpp" />
-    <ClCompile Include="DrawableGameObject.cpp" />
-    <ClCompile Include="main.cpp" />
     <ClCompile Include="imgui\imgui_impl_win32.cpp">
       <Filter>imgui</Filter>
     </ClCompile>
@@ -29,19 +25,34 @@
     <ClCompile Include="imgui\imgui_widgets.cpp">
       <Filter>imgui</Filter>
     </ClCompile>
-    <ClCompile Include="TerrainGenDS.cpp" />
-    <ClCompile Include="HydraulicErosion.cpp" />
-    <ClCompile Include="nfd_common.c" />
-    <ClCompile Include="nfd_win.cpp" />
+    <ClCompile Include="Camera.cpp">
+      <Filter>cpp</Filter>
+    </ClCompile>
+    <ClCompile Include="DDSTextureLoader.cpp">
+      <Filter>cpp</Filter>
+    </ClCompile>
+    <ClCompile Include="DrawableGameObject.cpp">
+      <Filter>cpp</Filter>
+    </ClCompile>
+    <ClCompile Include="HydraulicErosion.cpp">
+      <Filter>cpp</Filter>
+    </ClCompile>
+    <ClCompile Include="main.cpp">
+      <Filter>cpp</Filter>
+    </ClCompile>
+    <ClCompile Include="TerrainGenDS.cpp">
+      <Filter>cpp</Filter>
+    </ClCompile>
+    <ClCompile Include="nfd_common.c">
+      <Filter>nfd</Filter>
+    </ClCompile>
+    <ClCompile Include="nfd_win.cpp">
+      <Filter>nfd</Filter>
+    </ClCompile>
+    <ClCompile Include="ReadAndWrite.cpp" />
+    <ClCompile Include="tiny_gltf.cc" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Camera.h" />
-    <ClInclude Include="constants.h" />
-    <ClInclude Include="DDSTextureLoader.h" />
-    <ClInclude Include="DrawableGameObject.h" />
-    <ClInclude Include="main.h" />
-    <CLInclude Include="resource.h" />
-    <ClInclude Include="structures.h" />
     <ClInclude Include="imgui\imgui_impl_win32.h">
       <Filter>imgui</Filter>
     </ClInclude>
@@ -66,14 +77,48 @@
     <ClInclude Include="imgui\imstb_truetype.h">
       <Filter>imgui</Filter>
     </ClInclude>
-    <ClInclude Include="TerrainGenDS.h" />
-    <ClInclude Include="HydraulicErosion.h" />
-    <ClInclude Include="FastNoiseLite.h" />
-    <ClInclude Include="nfd.h" />
-    <ClInclude Include="nfd_common.h" />
-  </ItemGroup>
-  <ItemGroup>
-    <ResourceCompile Include="Tutorial01.rc" />
+    <ClInclude Include="Camera.h">
+      <Filter>header</Filter>
+    </ClInclude>
+    <ClInclude Include="DDSTextureLoader.h">
+      <Filter>header</Filter>
+    </ClInclude>
+    <ClInclude Include="constants.h">
+      <Filter>header</Filter>
+    </ClInclude>
+    <ClInclude Include="FastNoiseLite.h">
+      <Filter>header</Filter>
+    </ClInclude>
+    <ClInclude Include="DrawableGameObject.h">
+      <Filter>header</Filter>
+    </ClInclude>
+    <ClInclude Include="HydraulicErosion.h">
+      <Filter>header</Filter>
+    </ClInclude>
+    <ClInclude Include="main.h">
+      <Filter>header</Filter>
+    </ClInclude>
+    <ClInclude Include="structures.h">
+      <Filter>header</Filter>
+    </ClInclude>
+    <CLInclude Include="resource.h">
+      <Filter>header</Filter>
+    </CLInclude>
+    <ClInclude Include="nfd.h">
+      <Filter>nfd</Filter>
+    </ClInclude>
+    <ClInclude Include="nfd_common.h">
+      <Filter>nfd</Filter>
+    </ClInclude>
+    <ClInclude Include="TerrainGenDS.h">
+      <Filter>header</Filter>
+    </ClInclude>
+    <ClInclude Include="ReadAndWrite.h" />
+    <ClInclude Include="json.hpp" />
+    <ClInclude Include="json_fwd.hpp" />
+    <ClInclude Include="stb_image.h" />
+    <ClInclude Include="stb_image_write.h" />
+    <ClInclude Include="tiny_gltf.h" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="Resources\stone.dds" />
@@ -81,6 +126,15 @@
   <ItemGroup>
     <Filter Include="imgui">
       <UniqueIdentifier>{50d7b8ea-b982-4d22-b159-764a7f9e5bc4}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="header">
+      <UniqueIdentifier>{0a826c3e-a980-4a03-a6e0-b19e53dcb0be}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="cpp">
+      <UniqueIdentifier>{d37530a8-65e4-4ebe-9893-4d8c1f639987}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="nfd">
+      <UniqueIdentifier>{e81e2a70-f957-4050-b9b6-0736cafb3d8f}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
 </Project>

@@ -27,11 +27,14 @@
 #include <thread>
 #include <sstream>
 #include "DirectXTex.h"
-
+#include <filesystem>
 #include <wincodec.h>
 
 #include "nfd.h"
 
+#include "ReadAndWrite.h"
+
+ReadAndWrite GLB;
 Camera* g_pCamera;
 
 #define SliderWidth 200
@@ -126,8 +129,7 @@ ID3D11Texture2D* n_frontTexture = nullptr;
 ID3D11Texture2D* n_backTexture = nullptr;
 
 int n_imageSize = 150;
-char                   s_modelFileName[32] = { "TerrainFileName" };
-char                   s_imageFileName[32] = { "ImageFileName" };
+string FileName;
 
 float ScaleX;
 float ScaleY;
@@ -489,7 +491,10 @@ void RegenerateHeightMap()
     desc.SampleDesc.Count = 1;
     desc.Usage = D3D11_USAGE_DEFAULT;
     desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-
+    if (n_backTexture) {
+        n_backTexture->Release();
+        n_backTexture = nullptr;
+    }
     HRESULT hr = g_pd3dDevice->CreateTexture2D(&desc, &subrecData, &n_backTexture);
     std::swap(n_frontTexture, n_backTexture);
     if (FAILED(hr)) {
@@ -498,7 +503,8 @@ void RegenerateHeightMap()
         n_pixels = nullptr;
         return;
     }
-
+    delete[] n_pixels;
+    n_pixels = nullptr;
 }
 //--------------------------------------------------------------------------------------
 // Create Direct3D device and swap chain
@@ -1201,8 +1207,116 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
         case 27:
             PostQuitMessage(0);
             break;
+        case 49:
+        {
+            if (b_FlatBool)
+            {
+                b_FlatBool = false;
+                b_RaiseBool = false;
+                b_LowerBool = false;
+                b_SmoothBool = false;
+                b_ColourBool = false;
+            }
+            else {
+                b_FlatBool = true;
+                b_RaiseBool = false;
+                b_LowerBool = false;
+                b_SmoothBool = false;
+                b_ColourBool = false;
+            }
+            break;
+        }
+        case 50:
+        {
+            if (b_RaiseBool)
+            {
+                b_FlatBool = false;
+                b_RaiseBool = false;
+                b_LowerBool = false;
+                b_SmoothBool = false;
+                b_ColourBool = false;
+            }
+            else {
+                b_FlatBool = false;
+                b_RaiseBool = true;
+                b_LowerBool = false;
+                b_SmoothBool = false;
+                b_ColourBool = false;
+            }
+            break;
+        }
+        case 51:
+        {
+            if (b_LowerBool)
+            {
+                b_FlatBool = false;
+                b_RaiseBool = false;
+                b_LowerBool = false;
+                b_SmoothBool = false;
+                b_ColourBool = false;
+            }
+            else {
+                b_FlatBool = false;
+                b_RaiseBool = false;
+                b_LowerBool = true;
+                b_SmoothBool = false;
+                b_ColourBool = false;
+            }
+            break;
+        }
+        case 52:
+        {
+            if (b_SmoothBool)
+            {
+                b_FlatBool = false;
+                b_RaiseBool = false;
+                b_LowerBool = false;
+                b_SmoothBool = false;
+                b_ColourBool = false;
+            }
+            else {
+                b_FlatBool = false;
+                b_RaiseBool = false;
+                b_LowerBool = false;
+                b_SmoothBool = true;
+                b_ColourBool = false;
+            }
+            break;
+        }
+        case 53:
+        {
+            if (b_ColourBool)
+            {
+                b_FlatBool = false;
+                b_RaiseBool = false;
+                b_LowerBool = false;
+                b_SmoothBool = false;
+                b_ColourBool = false;
+            }
+            else {
+                b_FlatBool = false;
+                b_RaiseBool = false;
+                b_LowerBool = false;
+                b_SmoothBool = false;
+                b_ColourBool = true;
+            }
+            break;
+        }
+        case 69:
+        {
+            g_GameObject.hydraulicErosion(h_cycles);
+            g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
+            break;
+        }
         }
         break;
+    
+    case WM_MBUTTONDOWN:
+        {
+        brushReturn info = RaycastBrush();
+        g_pCamera->SetTarget(info.StructPickedPosition);
+        break;
+        }
 
     case WM_MOUSEWHEEL:
     {
@@ -1332,16 +1446,16 @@ bool OpenFileDialog(bool imgObj) {
     nfdchar_t* outPath = NULL;
     const nfdchar_t* filterList;
     if (imgObj) {
-        filterList = "png,jpg";
+        filterList = "png,jpg,jpeg";
     }
     else if (!imgObj) {
-        filterList = "ply";
+        filterList = "glb";
     }
     nfdresult_t result = NFD_OpenDialog(filterList, NULL, &outPath);
 
     if (result == NFD_OKAY) {
         std::cout << "Selected file: " << outPath << std::endl;
-        SaveLocation = (string)outPath;
+        LoadObjLocation = (string)outPath;
         free(outPath);
         return true;
     }
@@ -1358,12 +1472,15 @@ bool OpenFileDialog(bool imgObj) {
 
 bool OpenFolderDialog() {
     nfdchar_t* outPath = NULL;
-
-    nfdresult_t result = NFD_PickFolder(NULL, &outPath);
+    nfdresult_t result = NFD_SaveDialog(NULL, NULL, &outPath);
 
     if (result == NFD_OKAY) {
         std::cout << "Selected file: " << outPath << std::endl;
-        SaveLocation = (string)outPath;
+        filesystem::path filePath = outPath;
+        filesystem::path folder_location = filePath.parent_path();
+        filesystem::path file_name = filePath.filename();
+        SaveLocation = folder_location.string();
+        FileName = file_name.string();
         return true;
         free(outPath);
     }
@@ -1379,58 +1496,60 @@ bool OpenFolderDialog() {
 }
 
 void LoadTerrain() {
-    ifstream myfile;
-    myfile.open(SaveLocation, ios::in);
-    if (!myfile.fail())
-    {
-        std::vector<std::vector<float>> map;
-        std::vector<std::vector<XMFLOAT3>> colourMap;
-    	string line;
-        bool start = false;
-        bool vertex = false;
-        bool index = false;
-        int vertexCount;
-        int vertexIndex = 0;
-        int squareNum;
+    GLB.ReadGLB(LoadObjLocation, &g_GameObject);
+    g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
+    //ifstream myfile;
+    //myfile.open(SaveLocation, ios::in);
+    //if (!myfile.fail())
+    //{
+    //    std::vector<std::vector<float>> map;
+    //    std::vector<std::vector<XMFLOAT3>> colourMap;
+    //	string line;
+    //    bool start = false;
+    //    bool vertex = false;
+    //    bool index = false;
+    //    int vertexCount;
+    //    int vertexIndex = 0;
+    //    int squareNum;
 
-        while (getline(myfile, line)) {
-            if (!start && !line.empty() && line == "end_header")
-            {
-                start = true;
-            }
-            if (!start && !line.empty() && line[0] == 'e' && line[8] == 'v')
-            {
-                sscanf(line.c_str(), "element vertex %i", &vertexCount);
-                squareNum = sqrt(vertexCount);
-                map = std::vector<std::vector<float>>(squareNum, std::vector<float>(squareNum, 0.0f));
-                colourMap = std::vector<std::vector<XMFLOAT3>>(squareNum, std::vector<XMFLOAT3>(squareNum, XMFLOAT3(0, 0, 0)));
-            }
-            if (start && vertexIndex <= vertexCount && !line.empty() && line != "end_header") {
-                XMFLOAT3 vertex;
-                XMFLOAT3 normal;
-                XMINT3 colour;
-                sscanf(line.c_str(), "%f %f %f %f %f %f %i %i %i %i", &vertex.x, &vertex.y, &vertex.z, &normal.x, &normal.y, &normal.z, &colour.x, &colour.y, &colour.z, &normal.x);
-                map[vertex.x][vertex.z] = vertex.y;
-                colourMap[vertex.x][vertex.z] = XMFLOAT3(((float)colour.x) / 255, ((float)colour.y) / 255, ((float)colour.z) / 255);
-                //OutputDebugStringA((to_string(vertices[vertIndex].Pos.x) + " ").c_str());
-                //OutputDebugStringA((to_string(vertices[vertIndex].Pos.y) + " ").c_str());
-                //OutputDebugStringA((to_string(vertices[vertIndex].Pos.z)+"\n").c_str());
-                vertexIndex++;
-                continue;
-            }
-            if (start && vertexIndex > vertexCount) {
-                g_GameObject.loadTerrain(&map, &colourMap, squareNum);
-                g_pCamera->SetDistance(squareNum);
-                g_pCamera->SetTarget(XMFLOAT3(squareNum / 2, squareNum / 2, squareNum / 2));
-                g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
-                g_GameObject.draw(g_pImmediateContext);
-                RegenerateHeightMap();
-                loadedModel = true;
-                TerrainGenerationMode = 2;
-                return;
-            }
-        }
-    }
+    //    while (getline(myfile, line)) {
+    //        if (!start && !line.empty() && line == "end_header")
+    //        {
+    //            start = true;
+    //        }
+    //        if (!start && !line.empty() && line[0] == 'e' && line[8] == 'v')
+    //        {
+    //            sscanf(line.c_str(), "element vertex %i", &vertexCount);
+    //            squareNum = sqrt(vertexCount);
+    //            map = std::vector<std::vector<float>>(squareNum, std::vector<float>(squareNum, 0.0f));
+    //            colourMap = std::vector<std::vector<XMFLOAT3>>(squareNum, std::vector<XMFLOAT3>(squareNum, XMFLOAT3(0, 0, 0)));
+    //        }
+    //        if (start && vertexIndex <= vertexCount && !line.empty() && line != "end_header") {
+    //            XMFLOAT3 vertex;
+    //            XMFLOAT3 normal;
+    //            XMINT3 colour;
+    //            sscanf(line.c_str(), "%f %f %f %f %f %f %i %i %i %i", &vertex.x, &vertex.y, &vertex.z, &normal.x, &normal.y, &normal.z, &colour.x, &colour.y, &colour.z, &normal.x);
+    //            map[vertex.x][vertex.z] = vertex.y;
+    //            colourMap[vertex.x][vertex.z] = XMFLOAT3(((float)colour.x) / 255, ((float)colour.y) / 255, ((float)colour.z) / 255);
+    //            //OutputDebugStringA((to_string(vertices[vertIndex].Pos.x) + " ").c_str());
+    //            //OutputDebugStringA((to_string(vertices[vertIndex].Pos.y) + " ").c_str());
+    //            //OutputDebugStringA((to_string(vertices[vertIndex].Pos.z)+"\n").c_str());
+    //            vertexIndex++;
+    //            continue;
+    //        }
+    //        if (start && vertexIndex > vertexCount) {
+    //            g_GameObject.loadTerrain(&map, &colourMap, squareNum);
+    //            g_pCamera->SetDistance(squareNum);
+    //            g_pCamera->SetTarget(XMFLOAT3(squareNum / 2, squareNum / 2, squareNum / 2));
+    //            g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
+    //            g_GameObject.draw(g_pImmediateContext);
+    //            RegenerateHeightMap();
+    //            loadedModel = true;
+    //            TerrainGenerationMode = 2;
+    //            return;
+    //        }
+    //    }
+    //}
 }
 
 void LoadPNG() {
@@ -1452,7 +1571,7 @@ void LoadPNG() {
     texDesc.Height = metadata.height;
     texDesc.MipLevels = static_cast<UINT>(metadata.mipLevels);
     texDesc.ArraySize = static_cast<UINT>(metadata.arraySize);
-    texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    texDesc.Format = img->format;
     texDesc.SampleDesc.Count = 1;
     texDesc.Usage = D3D11_USAGE_STAGING;
     texDesc.BindFlags = 0;
@@ -1477,16 +1596,16 @@ void LoadPNG() {
         return;
     }
 
-    D3D11_TEXTURE2D_DESC texDescReal = texDesc;
-    texDescReal.Usage = D3D11_USAGE_DEFAULT; // Usage must be default for rendering
-    texDescReal.CPUAccessFlags = 0; // No CPU access required for rendering
-    texDescReal.BindFlags = D3D11_BIND_SHADER_RESOURCE; // Binding for shader resource
+    //D3D11_TEXTURE2D_DESC texDescReal = texDesc;
+    //texDescReal.Usage = D3D11_USAGE_DEFAULT; // Usage must be default for rendering
+    //texDescReal.CPUAccessFlags = 0; // No CPU access required for rendering
+    //texDescReal.BindFlags = D3D11_BIND_SHADER_RESOURCE; // Binding for shader resource
 
-    hr = g_pd3dDevice->CreateTexture2D(&texDescReal, &initData, &n_backTexture);
-    if (FAILED(hr)) {
-        std::wcerr << L"Failed to create texture. HRESULT: " << hr << std::endl;
-        return;
-    }
+    //hr = g_pd3dDevice->CreateTexture2D(&texDescReal, &initData, &n_backTexture);
+    //if (FAILED(hr)) {
+    //    std::wcerr << L"Failed to create texture. HRESULT: " << hr << std::endl;
+    //    return;
+    //}
 
     D3D11_MAPPED_SUBRESOURCE mappedResource;
     hr = g_pImmediateContext->Map(stagingTexture, 0, D3D11_MAP_READ, 0, &mappedResource);
@@ -1501,29 +1620,58 @@ void LoadPNG() {
     int width = texDesc.Width;
     int height = texDesc.Height;
 
-    std::swap(n_frontTexture, n_backTexture);
+   /* std::swap(n_frontTexture, n_backTexture);*/
 
+    n_height = 512;
     std::vector<std::vector<float>> map(height, std::vector<float>(width));
+    if (img->format == DXGI_FORMAT_R16_UNORM)
+    {
+        for (int x = 0; x < height; x++) {
+            unsigned char* rowStart = static_cast<unsigned char*>(pixelData) + x * mappedResource.RowPitch;
+            for (int y = 0; y < width; y++) {
+                unsigned short r = *reinterpret_cast<unsigned short*>(&rowStart[y * 2]);
 
-    for (int x = 0; x < height; x++) {
-        unsigned char* rowStart = static_cast<unsigned char*>(pixelData) + x * mappedResource.RowPitch;
-        for (int y = 0; y < width; y++) {
-            unsigned char r = rowStart[y * 4];     // Red channel (assumes RGBA 8-bit format)
-            unsigned char g = rowStart[y * 4 + 1]; // Green channel
-            unsigned char b = rowStart[y * 4 + 2]; // Blue channel
+                int colour = (r); // Average RGB
+                map[x][y] = RatioValueConverter(0, 65535, n_floor, n_height, colour);
+            }
+        }
+    }
+    else if (img->format == DXGI_FORMAT_R8_UNORM)
+    {
+        for (int x = 0; x < height; x++) {
+            unsigned char* rowStart = static_cast<unsigned char*>(pixelData) + x * mappedResource.RowPitch;
+            for (int y = 0; y < width; y++) {
+                unsigned char r = rowStart[y];     // Red channel (assumes RGBA 8-bit format)
 
-            int colour = (r + g + b) / 3; // Average RGB
-            map[x][y] = RatioValueConverter(0, 255, n_floor, n_height, colour);
+                int colour = (r); // Average RGB
+                map[x][y] = RatioValueConverter(0, 255, n_floor, n_height, colour);
+            }
+        }
+    }
+    else {
+        for (int x = 0; x < height; x++) {
+            unsigned char* rowStart = static_cast<unsigned char*>(pixelData) + x * mappedResource.RowPitch;
+            for (int y = 0; y < width; y++) {
+                unsigned char r = rowStart[y * 4];     // Red channel (assumes RGBA 8-bit format)
+                unsigned char g = rowStart[y * 4 + 1]; // Green channel
+                unsigned char b = rowStart[y * 4 + 2]; // Blue channel
+
+                int colour = (r + g + b) / 3; // Average RGB
+                map[x][y] = RatioValueConverter(0, 255, n_floor, n_height, colour);
+            }
         }
     }
     g_GameObject.noiseGenerateTerrain(&map, height);
     g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
+    RegenerateHeightMap();
+    if (stagingTexture) { stagingTexture->Release(); stagingTexture = nullptr; }
     map.clear();
     map.shrink_to_fit();
     loadedModel = true;
     n_PerlinOn = false;
     n_SimplexOn = false;
     n_CellularOn = false;
+    g_pCamera->SetTarget(XMFLOAT3(g_GameObject.GetSize()/2, n_height / 2, g_GameObject.GetSize()/2));
     TerrainGenerationMode = 2;
 }
 
@@ -1619,85 +1767,138 @@ float calculateDeltaTime()
 
 void saveTerrain()
 {
-    std::string fileName = std::string(s_modelFileName) + ".ply";
-    ofstream myfile(SaveLocation+"\\"+fileName);
-    int CountVertices = 0;
-    int CountIndices = 0;
-    int IndexCount = g_GameObject.GetIndexCount();
-    int VertexCount = g_GameObject.GetVertexCount();
-    std::vector<std::vector<XMFLOAT3>>* CM = g_GameObject.GetColourMap();
-    SimpleVertex* SV = g_GameObject.GetVertices();
-    DWORD* Faces = g_GameObject.GetIndices();
-    int size = g_GameObject.GetSize();
-    std::ostringstream output;
-    myfile << "ply\n";
-    myfile << "format ascii 1.0\n";
-    myfile << "element vertex " << VertexCount << "\n";
-    myfile << "property float x\n";
-    myfile << "property float y\n";
-    myfile << "property float z\n";
-    myfile << "property float nx\n";
-    myfile << "property float ny\n";
-    myfile << "property float nz\n";
-    myfile << "property uchar red\n";
-    myfile << "property uchar blue\n";
-    myfile << "property uchar green\n";
-    myfile << "property uchar alpha\n";
-    myfile << "element face " << IndexCount/3 << "\n";
-    myfile << "property list uchar int vertex_indices\n";
-    myfile << "end_header\n";
+    GLB.ExportGLB(g_GameObject.GetVertices(), g_GameObject.GetIndices(), g_GameObject.GetVertexCount(), g_GameObject.GetIndexCount(), SaveLocation, FileName);
+    //std::string fileName = FileName + ".ply";
+    //ofstream myfile(SaveLocation+"\\"+fileName);
+    //int CountVertices = 0;
+    //int CountIndices = 0;
+    //int IndexCount = g_GameObject.GetIndexCount();
+    //int VertexCount = g_GameObject.GetVertexCount();
+    //std::vector<std::vector<XMFLOAT3>>* CM = g_GameObject.GetColourMap();
+    //SimpleVertex* SV = g_GameObject.GetVertices();
+    //DWORD* Faces = g_GameObject.GetIndices();
+    //int size = g_GameObject.GetSize();
+    //std::ostringstream output;
+    //myfile << "ply\n";
+    //myfile << "format ascii 1.0\n";
+    //myfile << "element vertex " << VertexCount << "\n";
+    //myfile << "property float x\n";
+    //myfile << "property float y\n";
+    //myfile << "property float z\n";
+    //myfile << "property float nx\n";
+    //myfile << "property float ny\n";
+    //myfile << "property float nz\n";
+    //myfile << "property uchar red\n";
+    //myfile << "property uchar blue\n";
+    //myfile << "property uchar green\n";
+    //myfile << "property uchar alpha\n";
+    //myfile << "element face " << IndexCount/3 << "\n";
+    //myfile << "property list uchar int vertex_indices\n";
+    //myfile << "end_header\n";
 
-    if (myfile)
-    {
-        int x = 0;
-        int y = 0;
-        for (int i = 0; i < VertexCount; ++i) {
+    //if (myfile)
+    //{
+    //    int x = 0;
+    //    int y = 0;
+    //    for (int i = 0; i < VertexCount; ++i) {
 
-            output << SV[i].Pos.x << " " << SV[i].Pos.y << " " << SV[i].Pos.z << " " << SV[i].Normal.x << " " << SV[i].Normal.y << " " << SV[i].Normal.z << " " << static_cast<int>((*CM)[x][y].x * 255) << " " << static_cast<int>((*CM)[x][y].y * 255) << " " << static_cast<int>((*CM)[x][y].z * 255) << " " << 255 << "\n";
+    //        output << SV[i].Pos.x << " " << SV[i].Pos.y << " " << SV[i].Pos.z << " " << SV[i].Normal.x << " " << SV[i].Normal.y << " " << SV[i].Normal.z << " " << static_cast<int>((*CM)[x][y].x * 255) << " " << static_cast<int>((*CM)[x][y].y * 255) << " " << static_cast<int>((*CM)[x][y].z * 255) << " " << 255 << "\n";
 
-            y++;
-            if (y >= size)
-            {
-                y = 0;
-                x++;
-            }
-            if ((i + 1) % 1000 == 0) {  // Flush every 1,000 vertices
-                myfile << output.str();
-                output.str("");
-                output.clear();
-            }
-        }
-        if (!output.str().empty())
-        {
-            myfile << output.str();
-            output.str("");
-            output.clear();
-        }
-        for (int i = 0; i < IndexCount; i += 3) {
-            output << 3 << " " << Faces[i] << " " << Faces[i + 1] << " " << Faces[i + 2] << "\n";
+    //        y++;
+    //        if (y >= size)
+    //        {
+    //            y = 0;
+    //            x++;
+    //        }
+    //        if ((i + 1) % 1000 == 0) {  // Flush every 1,000 vertices
+    //            myfile << output.str();
+    //            output.str("");
+    //            output.clear();
+    //        }
+    //    }
+    //    if (!output.str().empty())
+    //    {
+    //        myfile << output.str();
+    //        output.str("");
+    //        output.clear();
+    //    }
+    //    for (int i = 0; i < IndexCount; i += 3) {
+    //        output << 3 << " " << Faces[i] << " " << Faces[i + 1] << " " << Faces[i + 2] << "\n";
 
-            if ((i + 3) % 1000 == 0) {  // Flush every 1,000 faces
-                myfile << output.str();
-                output.str("");
-                output.clear();
-            }
-        }
-        if (!output.str().empty())
-        {
-            myfile << output.str();
-            output.str("");
-            output.clear();
-        }
-    }
+    //        if ((i + 3) % 1000 == 0) {  // Flush every 1,000 faces
+    //            myfile << output.str();
+    //            output.str("");
+    //            output.clear();
+    //        }
+    //    }
+    //    if (!output.str().empty())
+    //    {
+    //        myfile << output.str();
+    //        output.str("");
+    //        output.clear();
+    //    }
+    //}
 }
 
 void saveImage()
 {
-    std::string fileName = SaveLocation + "\\" + std::string(s_imageFileName) + ".png";
+    std::string fileName = SaveLocation + "\\" + FileName + ".png";
     std::wstring wFileName(fileName.begin(), fileName.end());
+    int size = g_GameObject.GetSize();
+    uint16_t* pixels = new uint16_t[size * size];
+    std::memset(pixels, 0, sizeof(uint16_t) * size * size);
+    float low = 300;
+    float high = 0;
+    for (int x = 0; x < size; x++) {
+        for (int y = 0; y < size; y++)
+        {
+            if (g_GameObject.GetHeight(x, y) > high) { high = g_GameObject.GetHeight(x, y); }
+            else if (g_GameObject.GetHeight(x, y) < low) { low = g_GameObject.GetHeight(x, y); }
+        }
+    }
+
+    for (int x = 0; x < size; x++) {
+        for (int y = 0; y < size; y++)
+        {
+            int colour = RatioValueConverter(low, high, 0, 65535, g_GameObject.GetHeight(x, y));
+            pixels[x + y * size] = colour;
+        }
+    }
+
+    D3D11_SUBRESOURCE_DATA subrecData = {};
+    subrecData.pSysMem = pixels;
+    subrecData.SysMemPitch = size * sizeof(uint16_t);
+
+    D3D11_TEXTURE2D_DESC desc = {};
+    desc.Width = size;
+    desc.Height = size;
+    desc.MipLevels = desc.ArraySize = 1;
+    desc.Format = DXGI_FORMAT_R16_UNORM;
+    desc.SampleDesc.Count = 1;
+    desc.Usage = D3D11_USAGE_DEFAULT;
+    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+    ID3D11Texture2D* saveTexture;
+    HRESULT hr = g_pd3dDevice->CreateTexture2D(&desc, &subrecData, &saveTexture);
+    if (FAILED(hr)) {
+        OutputDebugStringA("Failed to create texture\n");
+        delete[] pixels;
+        pixels = nullptr;
+        return;
+    }
     DirectX::ScratchImage image;
-    DirectX::CaptureTexture(g_pd3dDevice, g_pImmediateContext, n_frontTexture, image);
+    DirectX::CaptureTexture(g_pd3dDevice, g_pImmediateContext, saveTexture, image);
     DirectX::SaveToWICFile(*image.GetImages(), DirectX::WIC_FLAGS_NONE, GUID_ContainerFormatPng, wFileName.c_str());
+    if (saveTexture)
+    {
+        saveTexture->Release();
+        saveTexture = nullptr;
+    }
+    if (pixels)
+    {
+        delete[] pixels;
+        pixels = nullptr;
+    }
 }
 
 static void HelpMarker(const char* desc)
@@ -1712,37 +1913,9 @@ static void HelpMarker(const char* desc)
         ImGui::EndTooltip();
     }
 }
-
-void DSGUI() {
-    ImGui::SetNextWindowSizeConstraints(ImVec2(UIWidthL * ScaleX, 80 * ScaleY), ImVec2(UIWidthL * ScaleX, 1500 * ScaleY));
-    ImGui::SetNextWindowPos(ImVec2(10 * ScaleX, 10 * ScaleY));
-    ImGui::Begin("Diamond Square Terrain", 0, ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::SetNextItemWidth(SliderWidth * ScaleX);
-    ImGui::SliderInt("Detail", &t_detail, 4, 11);
-    HelpMarker("The size of the terrain, so a detail of 9 is 513x513 and 10 would be 1025x1025 and 11 is 2049x2049.");
-    ImGui::SetNextItemWidth(SliderWidth * ScaleX);
-    ImGui::SliderFloat("Roughness", &t_roughness, 0, 1);
-    HelpMarker("The maximum difference between vertices, 0 is flat and 1 is very jagged.");
-    if (ImGui::Button("Generate"))
-    {
-        g_GameObject.setDetailRoughness(t_detail, t_roughness);
-        float temp = (pow(2, t_detail) + 1) / 2;
-        g_pCamera->SetTarget(XMFLOAT3(temp, temp, temp));
-        g_pCamera->SetDistance(temp * 5);
-        g_GameObject.generateTerrain(n_pixels, n_backTexture, g_pd3dDevice);
-        std::swap(n_frontTexture, n_backTexture);
-        g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
-    }
-    HelpMarker("Generates the terrain with a random seed using the detail and roughness value.");
-
-    width = ImGui::GetWindowWidth();
-    height = ImGui::GetWindowHeight();
-    ImGui::End();
-}
-
 void HydroErosionGUI() {
     ImGui::SetNextWindowSizeConstraints(ImVec2(UIWidthL * 0.9 * ScaleX, 80 * ScaleY), ImVec2(UIWidthL * ScaleX, 1500 * ScaleY));
-    ImGui::SetNextWindowPos(ImVec2((10) * ScaleX, 10 * ScaleY + height));
+    ImGui::SetNextWindowPos(ImVec2(0, 0 + height));
     ImGui::Begin("Hydraulic Erosion", 0, ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::SetNextItemWidth(SliderWidth * ScaleX);
     ImGui::SliderInt("Cycles", &h_cycles, 2000, 200000);
@@ -1773,12 +1946,76 @@ void HydroErosionGUI() {
         g_GameObject.hydraulicErosion(h_cycles);
         g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
     }
+    ImGui::SameLine();
+    ImGui::Text("Key E");
+    if (ImGui::Button("Smooth Terrain"))
+    {
+        float size = g_GameObject.GetSize();
+
+        std::vector<std::vector<float>> smoothedHeights(size, std::vector<float>(size, 0.0f));
+
+        for (int x = 0; x < size; x++)
+        {
+            for (int y = 0; y < size; y++)
+            {
+                float avgHeight = 0;
+                int neighborCount = 0;
+
+                // Calculate the average height of neighbors
+                if (x + 1 < size) {
+                    avgHeight += g_GameObject.GetHeight(x + 1, y);
+                    neighborCount++;
+                }
+                if (x - 1 >= 0) {
+                    avgHeight += g_GameObject.GetHeight(x - 1, y);
+                    neighborCount++;
+                }
+                if (y + 1 < size) {
+                    avgHeight += g_GameObject.GetHeight(x, y + 1);
+                    neighborCount++;
+                }
+                if (y - 1 >= 0) {
+                    avgHeight += g_GameObject.GetHeight(x, y - 1);
+                    neighborCount++;
+                }
+
+                if (neighborCount > 0) {
+                    avgHeight /= neighborCount;
+
+                    // Blend the averaged height with the original height
+                    float originalHeight = g_GameObject.GetHeight(x, y);
+                    float newHeight = 0.1 * avgHeight + (1 - 0.1) * originalHeight;
+
+                    // Store the smoothed height in the temporary buffer
+                    smoothedHeights[x][y] = newHeight;
+                }
+                else {
+                    // If no neighbors, keep the original height
+                    smoothedHeights[x][y] = g_GameObject.GetHeight(x, y);
+                }
+            }
+        }
+
+        // Apply the smoothed heights to the terrain
+        for (int x = 0; x < size; x++)
+        {
+            for (int y = 0; y < size; y++)
+            {
+                g_GameObject.SetHeight(x, y, smoothedHeights[x][y]);
+            }
+        }
+        smoothedHeights.clear();
+        smoothedHeights.shrink_to_fit();
+        g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
+        RegenerateHeightMap();
+    }
+    HelpMarker("Smooths out the jagged terrain left from hydraulic erosion");
     height += ImGui::GetWindowHeight();
     ImGui::End();
 }
 
 void HeightMapImage() {
-    ImGui::SetNextWindowPos(ImVec2((10 * ScaleX + width)  , 10 * ScaleY));
+    ImGui::SetNextWindowPos(ImVec2(width, height));
     ImGui::Begin("Height Map Image", 0, ImGuiWindowFlags_AlwaysAutoResize);
     HelpMarker("Height values represented as an image");
     ImGui::SetNextItemWidth(50 * ScaleX);
@@ -1808,13 +2045,9 @@ void HeightMapImage() {
 }
 
 void File() {
-    ImGui::SetNextWindowSizeConstraints(ImVec2(UIWidthR * ScaleX, 80 * ScaleY), ImVec2(UIWidthR * ScaleX, 200 * ScaleY));
-    ImGui::SetNextWindowPos(ImVec2(screenWidth - (10 + UIWidthR) * ScaleX, 10 * ScaleY));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(UIWidthR*0.85 * ScaleX, 80 * ScaleY), ImVec2(UIWidthR*0.85 * ScaleX, 200 * ScaleY));
+    ImGui::SetNextWindowPos(ImVec2(screenWidth - (UIWidthR*0.85) * ScaleX, 0));
     ImGui::Begin("File", 0, ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::SetNextItemWidth(120*ScaleX);
-    ImGui::InputText("Terrain File Name", s_modelFileName, 32);
-    ImGui::SetNextItemWidth(120 * ScaleX);
-    ImGui::InputText("Height Map File Name", s_imageFileName, 32);
     if (ImGui::Button("Load PLY file"))
     {
         if (OpenFileDialog(false)) { LoadTerrain(); }
@@ -1844,7 +2077,7 @@ void File() {
 
 void Intro() {
     ImGui::SetNextWindowSizeConstraints(ImVec2(UIWidthL * 0.9 * ScaleX, 80 * ScaleY), ImVec2(UIWidthL * ScaleX, 1500 * ScaleY));
-    ImGui::SetNextWindowPos(ImVec2(10*ScaleX,10*ScaleY));
+    ImGui::SetNextWindowPos(ImVec2(0,0));
     ImGui::Begin("Information", 0, ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::TextWrapped("This is a terrain generation tool. The two terrain generation modes Diamond Square and noise.\n\nCamera movement, right click will rotate the camera around the centre point, and press Control + Left Click to move the centre point, to reset there is a button in view on the right hand side. And to zoom in and out you use the scroll wheel.\n\nTo directly edit slider values you can Control + Left Click on the sliders to access the value entry mode\n\n You can load in a heightmap and ply model (only ones created from this tool for now) through the menu on the right along with exporting them. When loading into the tool you can adjust the model with the height slider but to start generating new models you will need to turn off the loaded model checkbox.\n\nClick the arrow at the top of this window to minimize this window.");
     if (ImGui::Button("Showcase terrain values")) {
@@ -1860,8 +2093,8 @@ void Intro() {
 }
 
 void View() {
-    ImGui::SetNextWindowSizeConstraints(ImVec2(UIWidthR * ScaleX, 80 * ScaleY), ImVec2(UIWidthR * ScaleX, 600 * ScaleY));
-    ImGui::SetNextWindowPos(ImVec2(screenWidth - (10 + UIWidthR) * ScaleX, 10 * ScaleY + height));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(UIWidthR *0.85* ScaleX, 80 * ScaleY), ImVec2(UIWidthR*0.85 * ScaleX, 600 * ScaleY));
+    ImGui::SetNextWindowPos(ImVec2(screenWidth - (0.85*UIWidthR) * ScaleX, height));
     ImGui::Begin("View", 0, ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::Text("Camera:");
     ImGui::Text("Position: %.2f, %.2f, %.2f", g_pCamera->GetPosition().x, g_pCamera->GetPosition().y, g_pCamera->GetPosition().z);
@@ -1869,7 +2102,7 @@ void View() {
     if (ImGui::Button("Reset Camera Rotation Position"))
     {
         float temp = g_GameObject.GetSize()/2;
-        g_pCamera->SetTarget(XMFLOAT3(temp, temp, temp));
+        g_pCamera->SetTarget(XMFLOAT3(temp, n_height/2, temp));
         g_pCamera->SetDistance(temp * 3);
     }
     HelpMarker("Resets Camera Position to center of terrain.");
@@ -1888,11 +2121,14 @@ void View() {
 
 void Brush()
 {
-    ImGui::SetNextWindowSizeConstraints(ImVec2(UIWidthR * ScaleX, 80 * ScaleY), ImVec2(UIWidthR * ScaleX, 500 * ScaleY));
-    ImGui::SetNextWindowPos(ImVec2(screenWidth - (10 + UIWidthR) * ScaleX, 10 * ScaleY + height));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(UIWidthR*0.90 *4*ScaleX, 80 * ScaleY), ImVec2(UIWidthR * 30 * ScaleX, 500 * ScaleY));
+    ImGui::SetNextWindowPos(ImVec2(width,0));
     ImGui::Begin("Terrain Brush", 0, ImGuiWindowFlags_AlwaysAutoResize);
+    ImGui::Columns(4, "Columns", true);
     ImGui::Checkbox("Flatten Brush Enabled", &b_FlatBool);
     HelpMarker("Enables the flatten brush so it flattens on left click and drag left click");
+    ImGui::SameLine();
+    ImGui::Text("Key 1");
     if (b_FlatBool)
     {
         b_RaiseBool = false;
@@ -1909,9 +2145,11 @@ void Brush()
         ImGui::SliderFloat("Smoothness", &b_SmoothnessFactor, 0.0f, 1.0f);
         HelpMarker("Adds some variance to flatten so its not completely flat. 1 is completely flat");
     }
-
+    ImGui::NextColumn();
     ImGui::Checkbox("Raise Brush Enabled", &b_RaiseBool);
     HelpMarker("Enables the Raise brush so it Raises/Extrudes on left click and drag left click");
+    ImGui::SameLine();
+    ImGui::Text("Key 2");
     if (b_RaiseBool)
     {
         b_FlatBool = false;
@@ -1928,9 +2166,11 @@ void Brush()
         ImGui::SliderFloat("Raise Strength", &b_RaiseStrength, 0.01f, 1.0f);
         HelpMarker("How spread out the raise brush is, 0 raise less further from the center, 1.0 adds to all points equally.");
     }
-
+    ImGui::NextColumn();
     ImGui::Checkbox("Lower Brush Enabled", &b_LowerBool);
     HelpMarker("Enables the Lower brush so it Lowers on left click and drag left click");
+    ImGui::SameLine();
+    ImGui::Text("Key 3");
     if (b_LowerBool)
     {
         b_RaiseBool = false;
@@ -1947,9 +2187,11 @@ void Brush()
         ImGui::SliderFloat("Lower Strength", &b_RaiseStrength, 0.01f, 1.0f);
         HelpMarker("How spread out the lower brush is, 0 lowers less further from the center, 1.0 lowers all points equally.");
     }
-
+    ImGui::NextColumn();
     ImGui::Checkbox("Smooth Brush Enabled", &b_SmoothBool);
     HelpMarker("Enables the Smooth brush so it Smooths on left click and drag left click");
+    ImGui::SameLine();
+    ImGui::Text("Key 4");
     if (b_SmoothBool)
     {
         b_RaiseBool = false;
@@ -1963,9 +2205,17 @@ void Brush()
         ImGui::SliderFloat("Smooth Rate", &b_SmoothRate, 0.01f, 1.0f);
         HelpMarker("How it averages heights, 0 doesnt take account any neighbors, and 1 averages all neighbors equally");
     }
-    
+    int tempwidth = width + ImGui::GetWindowWidth();
+    height = ImGui::GetWindowHeight();
+    ImGui::End();
+    ImGui::SetNextWindowSizeConstraints(ImVec2(UIWidthR * 0.80 * ScaleX, 80 * ScaleY), ImVec2(UIWidthR * 0.80 * ScaleX, 500 * ScaleY));
+    ImGui::SetNextWindowPos(ImVec2(tempwidth, 0));
+
+    ImGui::Begin("Colour Brush", 0, ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::Checkbox("Colour Brush Enabled", &b_ColourBool);
     HelpMarker("Enables the Colour brush so it Colours on left click and drag left click");
+    ImGui::SameLine();
+    ImGui::Text("Key 5");
     if (b_ColourBool)
     {
         b_RaiseBool = false;
@@ -1978,13 +2228,14 @@ void Brush()
         ImGui::InputInt("Colour Size", &b_ColourSize);
         HelpMarker("Size of brush");
     }
+
     ImGui::End();
 }
 
 void TerrainGeneration()
 {
     ImGui::SetNextWindowSizeConstraints(ImVec2(width, 80 * ScaleY), ImVec2(width, 1500 * ScaleY));
-    ImGui::SetNextWindowPos(ImVec2(10 * ScaleX , (10 * ScaleY + height) ));
+    ImGui::SetNextWindowPos(ImVec2(0 ,height ));
     ImGui::Begin("Terrain Generation", 0, ImGuiWindowFlags_AlwaysAutoResize);
     int size = ImGui::GetContentRegionAvail().x;
     if (ImGui::Button("Diamond Square", ImVec2(size/2, 0.0f)))
@@ -2044,7 +2295,7 @@ void TerrainGeneration()
         }
         HelpMarker("Redistributes the terrain");
         ImGui::SetNextItemWidth(SliderWidth * ScaleX);
-        if (ImGui::SliderFloat("Height", &n_height, 1, 1024))
+        if (ImGui::SliderFloat("Height", &n_height, 1, 2048))
         {
             if (!loadedModel) {
                 GenerateNoiseImageAndTerrain(FALSE, TRUE);
@@ -2188,11 +2439,12 @@ void TerrainGeneration()
 void RenderDebugWindow(float deltaTime) {
     Intro();
     HydroErosionGUI();
-    HeightMapImage();
     TerrainGeneration();
+    Brush();
+    HeightMapImage();
     File();
     View();
-    Brush();
+    
 }
 
 //--------------------------------------------------------------------------------------
