@@ -6,6 +6,7 @@
 #include <windows.h>
 #include <windowsx.h>
 #include "constants.h"
+#include <string>
 
 using namespace DirectX;
 
@@ -27,6 +28,11 @@ public:
 
     void Rotate(float deltaYaw, float deltaPitch) 
     {
+        if (distance < 0.0f)
+        {
+            deltaYaw = deltaYaw;
+            deltaPitch = -deltaPitch;
+        }
         yaw += deltaYaw;
         pitch = std::clamp(pitch + deltaPitch, -XM_PIDIV2 + 0.01f, XM_PIDIV2 - 0.01f);
         UpdatePosition();
@@ -40,7 +46,7 @@ public:
 
     XMFLOAT3 GetPosition() { return position; }
     XMFLOAT3 GetTarget() { return target; }
-    void SetTarget(XMFLOAT3 newTarget) { target = newTarget; UpdatePosition(); UpdateLookDir(); }
+    void SetTarget(XMFLOAT3 newTarget) { target = newTarget; UpdatePosition(); }
     void SetOnlyTarget (XMFLOAT3 newTarget) { target = newTarget; }
     XMMATRIX GetViewMatrix() const
     {
@@ -78,19 +84,21 @@ private:
 
     void UpdateLookDir()
     {
-        // Calculate the initial look direction based on the current yaw and pitch
-        float x = distance * cosf(pitch) * sinf(yaw);
-        float y = distance * sinf(pitch);
-        float z = distance * cosf(pitch) * cosf(yaw);
+        XMVECTOR directionVec = XMLoadFloat3(&position) - XMLoadFloat3(&target);
+        XMVECTOR lookDirVec = XMVector3Normalize(directionVec);
 
-        XMVECTOR directionVec = XMVectorSet(x, y, z, 0.0f);
-        XMVECTOR targetVec = XMLoadFloat3(&target);
+        if (distance < 0.0f)
+        {
+            lookDirVec = -lookDirVec;
+        }
 
-        // Calculate the look direction from the camera to the target
-        XMVECTOR lookDirVec = XMVector3Normalize(targetVec - directionVec);
-
-        // Store it in the lookDir variable
         XMStoreFloat3(&lookDir, lookDirVec);
+
+        // Debug output
+        std::string debugMsg = "LookDir: (" + std::to_string(lookDir.x) +
+            ", " + std::to_string(lookDir.y) +
+            ", " + std::to_string(lookDir.z) + ")\n";
+        OutputDebugStringA(debugMsg.c_str());
     }
 
     void UpdateViewMatrix()
@@ -106,6 +114,18 @@ private:
 
         position = { target.x + x, target.y + y, target.z + z };
 
+        // Debug output
+        std::string debugMsg = "Distance: " + std::to_string(distance) +
+            ", Yaw: " + std::to_string(yaw) +
+            ", Pitch: " + std::to_string(pitch) + "\n";
+        OutputDebugStringA(debugMsg.c_str());
+
+        debugMsg = "Position: (" + std::to_string(position.x) +
+            ", " + std::to_string(position.y) +
+            ", " + std::to_string(position.z) + ")\n";
+        OutputDebugStringA(debugMsg.c_str());
+
+        UpdateLookDir();
         UpdateViewMatrix();
     }
 

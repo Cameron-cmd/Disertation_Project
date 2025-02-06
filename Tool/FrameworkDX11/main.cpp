@@ -190,6 +190,124 @@ POINTS mousePos;
 RECT rect;
 bool mouseDownR = false;
 bool mouseDownL = false;
+
+bool wasEdited = false;
+
+int UndoRedoIndex = 0;
+int maxURLength = 30;
+std::vector<std::vector<XMFLOAT4>> UndoRedo(maxURLength, std::vector<XMFLOAT4>(0));
+std::vector<std::vector<XMFLOAT3>> Colour(maxURLength, std::vector<XMFLOAT3>(0));
+void RegenerateHeightMap();
+void ClearAllUR()
+{
+    for (int i = 0; i < maxURLength - 1; i++)
+    {
+        UndoRedo[i].clear();
+        Colour[i].clear();
+    }
+    UndoRedoIndex = 0;
+}
+void CheckVectorSpace()
+{
+    if (UndoRedoIndex == maxURLength)
+    {
+        Colour.erase(Colour.begin());
+        UndoRedo.erase(UndoRedo.begin());
+        Colour.push_back(std::vector<XMFLOAT3>(0));
+        UndoRedo.push_back(std::vector<XMFLOAT4>(0));
+        UndoRedoIndex = maxURLength-1;
+    }
+}
+void ClearAfterVector()
+{
+    for (int i = UndoRedoIndex; i < maxURLength; i++)
+    {
+        UndoRedo[i].clear();
+        Colour[i].clear();
+    }
+}
+void AddPositionToUndo(XMFLOAT3 newPos, bool isColour, XMFLOAT3 colour)
+{
+    bool isContained = false;
+    for (XMFLOAT4 pos : UndoRedo[UndoRedoIndex])
+    {
+        if (newPos.x == pos.x && newPos.z == pos.z)
+        {
+            isContained = true;
+            break;
+        }
+    }
+    if (!isContained && !isColour)
+    {
+        UndoRedo[UndoRedoIndex].push_back(XMFLOAT4(newPos.x, newPos.y, newPos.z, 0));
+    }
+    else if (!isContained && isColour)
+    {
+        UndoRedo[UndoRedoIndex].push_back(XMFLOAT4(newPos.x, 0, newPos.z, 1));
+        Colour[UndoRedoIndex].push_back(colour);
+    }
+    wasEdited = true;
+}
+void IncrementUndoRedo(int increment)
+{
+    UndoRedoIndex += increment;
+}
+void Undo()
+{
+    if (UndoRedoIndex <= 0) {
+        UndoRedoIndex = 0;
+        return;
+    }
+    int ColourIndex = 0;
+    UndoRedo[UndoRedoIndex].clear();
+    Colour[UndoRedoIndex].clear();
+    for (XMFLOAT4 pos : UndoRedo[UndoRedoIndex - 1])
+    {
+        if (pos.w == 0)
+        {
+            UndoRedo[UndoRedoIndex].push_back(XMFLOAT4(pos.x, g_GameObject.GetHeight(pos.x, pos.z), pos.z, 0));
+            g_GameObject.SetHeight(pos.x, pos.z, pos.y);
+        }
+        else
+        {
+            UndoRedo[UndoRedoIndex].push_back(XMFLOAT4(pos.x, 0, pos.z, 1));
+            Colour[UndoRedoIndex].push_back(g_GameObject.GetColour(pos.x, pos.z));
+            g_GameObject.SetColour(pos.x, pos.z, Colour[UndoRedoIndex - 1][ColourIndex]);
+            ColourIndex++;
+        }
+    }
+    UndoRedoIndex--;
+    RegenerateHeightMap();
+
+}
+void Redo()
+{
+    if (UndoRedoIndex >= maxURLength-1) {
+        UndoRedoIndex = maxURLength - 1;
+        return;
+    }
+    if (UndoRedo[UndoRedoIndex + 1].size() == 0) { return; }
+    UndoRedo[UndoRedoIndex].clear();
+    Colour[UndoRedoIndex].clear();
+
+    int ColourIndex = 0;
+    for (XMFLOAT4 pos : UndoRedo[UndoRedoIndex + 1])
+    {
+        if (pos.w == 0)
+        {
+            UndoRedo[UndoRedoIndex].push_back(XMFLOAT4(pos.x, g_GameObject.GetHeight(pos.x, pos.z), pos.z, 0));
+            g_GameObject.SetHeight(pos.x, pos.z, pos.y);
+        }
+        else {
+            UndoRedo[UndoRedoIndex].push_back(XMFLOAT4(pos.x, 0, pos.z, 1));
+            Colour[UndoRedoIndex].push_back(g_GameObject.GetColour(pos.x, pos.z));
+            g_GameObject.SetColour(pos.x, pos.z, Colour[UndoRedoIndex+1][ColourIndex]);
+            ColourIndex++;
+        }
+    }
+    UndoRedoIndex++;
+    RegenerateHeightMap();
+}
 //--------------------------------------------------------------------------------------
 // Entry point to the program. Initializes everything and goes into a message processing 
 // loop. Idle time is used to render the scene.
@@ -387,6 +505,7 @@ void ProcessChunk(int startX, int endX, std::vector<std::vector<float>>* map, bo
 void RegenerateHeightMap();
 void GenerateNoiseImageAndTerrain(bool Image, bool Terrain)
 {
+    ClearAllUR();
     n_pixels = new uint32_t[n_resolution * n_resolution];
     memset(n_pixels, 0, sizeof(uint32_t) * n_resolution * n_resolution);
     std::vector<std::vector<float>> map(n_resolution, std::vector<float>(n_resolution));
@@ -1005,6 +1124,8 @@ void BrushFunc(bool held, int BrushNumber, int BrushSize)
 
                         float newHeight = weight * b_RaiseRate + curheight;
 
+                        AddPositionToUndo(XMFLOAT3(nx, curheight, nz), 0, XMFLOAT3(0, 0, 0));
+
                         g_GameObject.SetHeight(nx, nz, newHeight);
                     }
                     //Lower / Depression brush
@@ -1015,7 +1136,7 @@ void BrushFunc(bool held, int BrushNumber, int BrushSize)
                         float weight = pow(1 - distanceFactor, b_LowerStrength);
 
                         float newHeight = curheight - weight * b_LowerRate ;
-
+                        AddPositionToUndo(XMFLOAT3(nx, curheight, nz), 0, XMFLOAT3(0,0,0));
                         g_GameObject.SetHeight(nx, nz, newHeight);
                     }
                     //Flatten brush
@@ -1023,9 +1144,8 @@ void BrushFunc(bool held, int BrushNumber, int BrushSize)
                     {
                         if (abs(pickedHeight - g_GameObject.GetHeight(nx, nz)) <= b_MaxFlatDifference)
                         {
-                            float currentHeight = g_GameObject.GetHeight(nx, nz);
-                            float newHeight = (1.0f - b_SmoothnessFactor) * currentHeight + b_SmoothnessFactor * pickedHeight;
-
+                            float newHeight = (1.0f - b_SmoothnessFactor) * curheight + b_SmoothnessFactor * pickedHeight;
+                            AddPositionToUndo(XMFLOAT3(nx, curheight, nz), 0, XMFLOAT3(0, 0, 0));
                             g_GameObject.SetHeight(nx, nz, newHeight);
                         }
                     }
@@ -1047,6 +1167,7 @@ void BrushFunc(bool held, int BrushNumber, int BrushSize)
         g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
         RegenerateHeightMap();
     }
+
 }
 
 void SmoothBrush(bool held, int BrushSize)
@@ -1056,6 +1177,11 @@ void SmoothBrush(bool held, int BrushSize)
     XMFLOAT3 F3 = info.StructPickedPosition;
     XMVECTOR rayDirection = info.RayDirection;
     XMVECTOR rightDirection = XMVector3Cross(rayDirection, XMVectorSet(0, 1, 0, 0)); // Correct cross product
+
+    if (F3.x == -1 && F3.y == -1 && F3.z)
+    {
+        return;
+    }
 
     int pickedX = F3.x;
     int pickedZ = F3.z;
@@ -1101,6 +1227,7 @@ void SmoothBrush(bool held, int BrushSize)
                     }
                     avgHeight /= neighborCount;
                     float newHeight = b_SmoothRate * avgHeight + (1 - b_SmoothRate) * g_GameObject.GetHeight(nx,nz);
+                    AddPositionToUndo(XMFLOAT3(nx, g_GameObject.GetHeight(nx, nz), nz), 0, XMFLOAT3(0,0,0));
 
                     // Add smoothed height to update vector
                     addVector.push_back(XMFLOAT3(nx, newHeight, nz));
@@ -1158,7 +1285,9 @@ void ColourBrush(bool held, int BrushSize)
                 float vz = XMVectorGetX(XMVector3Dot(offset, rayDirection));
 
                 // Check if within the brush circle
+
                 if (vx * vx + vz * vz <= BrushSize * BrushSize) {
+                    AddPositionToUndo(XMFLOAT3(nx, 0, nz), 1, g_GameObject.GetColour(nx,nx));
                     g_GameObject.SetColour(nx, nz, b_Colour);
                 }
             }
@@ -1207,9 +1336,23 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
         case 27:
             PostQuitMessage(0);
             break;
+        case 0x5A:
+        {
+            if (GetKeyState(VK_LCONTROL) & 0x8000) {
+                if (GetKeyState(VK_LSHIFT) & 0x8000)
+                {
+                    Redo();
+                }
+                else {
+                    Undo();
+                }
+                g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
+            }
+            break;
+        }
         case 49:
         {
-            if (b_FlatBool)
+            if (b_FlatBool && !ImGui::IsAnyItemActive())
             {
                 b_FlatBool = false;
                 b_RaiseBool = false;
@@ -1217,7 +1360,7 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
                 b_SmoothBool = false;
                 b_ColourBool = false;
             }
-            else {
+            else if (!ImGui::IsAnyItemActive()) {
                 b_FlatBool = true;
                 b_RaiseBool = false;
                 b_LowerBool = false;
@@ -1228,7 +1371,7 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
         }
         case 50:
         {
-            if (b_RaiseBool)
+            if (b_RaiseBool && !ImGui::IsAnyItemActive())
             {
                 b_FlatBool = false;
                 b_RaiseBool = false;
@@ -1236,7 +1379,7 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
                 b_SmoothBool = false;
                 b_ColourBool = false;
             }
-            else {
+            else if (!ImGui::IsAnyItemActive() ){
                 b_FlatBool = false;
                 b_RaiseBool = true;
                 b_LowerBool = false;
@@ -1247,7 +1390,7 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
         }
         case 51:
         {
-            if (b_LowerBool)
+            if (b_LowerBool && !ImGui::IsAnyItemActive())
             {
                 b_FlatBool = false;
                 b_RaiseBool = false;
@@ -1255,7 +1398,7 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
                 b_SmoothBool = false;
                 b_ColourBool = false;
             }
-            else {
+            else if ( !ImGui::IsAnyItemActive() ){
                 b_FlatBool = false;
                 b_RaiseBool = false;
                 b_LowerBool = true;
@@ -1266,7 +1409,7 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
         }
         case 52:
         {
-            if (b_SmoothBool)
+            if (b_SmoothBool && !ImGui::IsAnyItemActive())
             {
                 b_FlatBool = false;
                 b_RaiseBool = false;
@@ -1274,7 +1417,7 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
                 b_SmoothBool = false;
                 b_ColourBool = false;
             }
-            else {
+            else if ( !ImGui::IsAnyItemActive() ){
                 b_FlatBool = false;
                 b_RaiseBool = false;
                 b_LowerBool = false;
@@ -1285,7 +1428,7 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
         }
         case 53:
         {
-            if (b_ColourBool)
+            if (b_ColourBool && !ImGui::IsAnyItemActive())
             {
                 b_FlatBool = false;
                 b_RaiseBool = false;
@@ -1293,7 +1436,7 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
                 b_SmoothBool = false;
                 b_ColourBool = false;
             }
-            else {
+            else if (!ImGui::IsAnyItemActive()) {
                 b_FlatBool = false;
                 b_RaiseBool = false;
                 b_LowerBool = false;
@@ -1336,10 +1479,19 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam 
         break;
     case WM_LBUTTONDOWN:
     {
-        mouseDownL = true;
+        if (!ImGui::IsAnyItemActive()) {
+            mouseDownL = true;
+            }
         break;
     }
     case WM_LBUTTONUP:
+        if ((b_FlatBool || b_LowerBool || b_RaiseBool || b_SmoothBool || b_ColourBool) && wasEdited)
+        {
+            IncrementUndoRedo(1);
+            CheckVectorSpace();
+            ClearAfterVector();
+            wasEdited = false;
+        }
         mouseDownL = false;
         break;
     case WM_MOUSEMOVE:
@@ -1498,6 +1650,7 @@ bool OpenFolderDialog() {
 void LoadTerrain() {
     GLB.ReadGLB(LoadObjLocation, &g_GameObject);
     g_GameObject.initMesh(g_pd3dDevice, g_pImmediateContext);
+    loadedModel = true;
     //ifstream myfile;
     //myfile.open(SaveLocation, ios::in);
     //if (!myfile.fail())
@@ -2115,6 +2268,7 @@ void View() {
     ImGui::Text("Face Count: %i", g_GameObject.GetIndexCount()/3);
     ImGui::Text("View:");
     ImGui::Checkbox("wireFrame", &wireframeEnabled);
+    ImGui::Text(to_string(UndoRedoIndex).c_str());
     height += ImGui::GetWindowHeight();
     ImGui::End();
 }
@@ -2258,6 +2412,7 @@ void TerrainGeneration()
         HelpMarker("The maximum difference between vertices, 0 is flat and 1 is very jagged.");
         if (ImGui::Button("Generate"))
         {
+            ClearAllUR();
             g_GameObject.setDetailRoughness(t_detail, t_roughness);
             float temp = (pow(2, t_detail) + 1) / 2;
             g_pCamera->SetTarget(XMFLOAT3(temp, temp, temp));

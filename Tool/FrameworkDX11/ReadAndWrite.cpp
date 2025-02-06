@@ -215,15 +215,46 @@ void ReadAndWrite::ReadGLB(const std::string& fileName, DrawableGameObject* game
         positionData[positionPtr[i * 3]][positionPtr[i * 3 + 2]] = positionPtr[i * 3 + 1];
     };
 
+    if (colorAccessor.bufferView < 0 || colorAccessor.bufferView >= model.bufferViews.size()) {
+        std::cerr << "Invalid buffer view index in colorAccessor!" << std::endl;
+        return;
+    }
+
+    const tinygltf::BufferView& colorBufferView = model.bufferViews[colorAccessor.bufferView];
+
+    if (colorBufferView.buffer < 0 || colorBufferView.buffer >= model.buffers.size()) {
+        std::cerr << "Invalid buffer index in colorBufferView!" << std::endl;
+        return;
+    }
+
+    const tinygltf::Buffer& colorBuffer = model.buffers[colorBufferView.buffer];
+
+    // Check if the byteOffset is valid
+    size_t totalOffset = colorBufferView.byteOffset + colorAccessor.byteOffset;
+    if (totalOffset < 0 || totalOffset >= colorBuffer.data.size()) {
+        std::cerr << "Invalid byteOffset in colorAccessor!" << std::endl;
+        return;
+    }
+
+    if (colorAccessor.componentType != TINYGLTF_COMPONENT_TYPE_FLOAT) {
+        std::cerr << "Color data is not stored as floats!" << std::endl;
+        return;
+    }
+
+    if (colorAccessor.type != TINYGLTF_TYPE_VEC3 && colorAccessor.type != TINYGLTF_TYPE_VEC4) {
+        std::cerr << "Color data is not stored as VEC3 or VEC4!" << std::endl;
+        return;
+    }
+
     // Reading color data (RGB values)
     int x = 0;
     int z = 0;
-    const float* colorPtr = reinterpret_cast<const float*>(&model.buffers[colorAccessor.bufferView].data[colorAccessor.byteOffset]);
+    const float* colorPtr = reinterpret_cast<const float*>(&colorBuffer.data[totalOffset]);
     for (size_t i = 0; i < vertexCount; ++i) {
         XMFLOAT3 color(
-            colorPtr[i * 3] / 255.0f,     // R
-            colorPtr[i * 3 + 1] / 255.0f, // G
-            colorPtr[i * 3 + 2] / 255.0f  // B
+            colorPtr[i * 3],     // R
+            colorPtr[i * 3 + 1], // G
+            colorPtr[i * 3 + 2]  // B
         );
         colorData[x][z] = color; // Store RGB values as XMFLOAT3
         z++;
