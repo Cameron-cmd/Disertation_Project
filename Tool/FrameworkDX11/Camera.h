@@ -103,17 +103,7 @@ private:
 
     void UpdateViewMatrix()
     {
-        XMVECTOR positionVec = XMLoadFloat3(&position);
-        XMVECTOR targetVec = XMLoadFloat3(&target);
-        XMVECTOR upVec = XMLoadFloat3(&up);
-
-        if (distance < 0.0f)
-        {
-            // When distance is negative, the camera should look away from the target
-            targetVec = positionVec + XMLoadFloat3(&lookDir);
-        }
-
-        XMStoreFloat4x4(&viewMatrix, XMMatrixLookAtLH(positionVec, targetVec, upVec));
+        XMStoreFloat4x4(&viewMatrix, XMMatrixLookAtLH(XMLoadFloat3(&position), XMLoadFloat3(&target), XMLoadFloat3(&up)));
     }
 
     void UpdatePosition()
@@ -134,6 +124,7 @@ private:
             ", " + std::to_string(position.y) +
             ", " + std::to_string(position.z) + ")\n";
         OutputDebugStringA(debugMsg.c_str());
+
         UpdateLookDir();
         UpdateViewMatrix();
     }

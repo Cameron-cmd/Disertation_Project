@@ -22,6 +22,59 @@ float DrawableGameObject::RatioValueConverter(float old_min, float old_max, floa
 	return (((value - old_min) / (old_max - old_min)) * (new_max - new_min) + new_min);
 }
 
+void DrawableGameObject::ColourFill(int x, int y, XMFLOAT3 Colour)
+{
+	targetColour = m_colourMap[x][y];
+	newColour = Colour;
+	int directions[4][2] = { {-1, 0}, {1, 0}, {0, -1}, {0, 1} };
+
+    // Queue for BFS (Breadth-First Search)
+    std::queue<std::pair<int, int>> toVisit;
+
+    // Start by adding the initial position
+    toVisit.push({x, y});
+    
+    // Iterate through all positions to change
+    while (!toVisit.empty()) {
+        auto [cx, cy] = toVisit.front();
+        toVisit.pop();
+
+        // Out of bounds check
+        if (cx < 0 || cx >= m_max || cy < 0 || cy >= m_max)
+            continue;
+
+        // If the current color matches the target color, change it
+        if (m_colourMap[cx][cy].x == targetColour.x && m_colourMap[cx][cy].y == targetColour.y && m_colourMap[cx][cy].z == targetColour.z) {
+            m_colourMap[cx][cy] = newColour;  // Change the color
+
+            // Check the 4 surrounding cells and add them to the queue if they match the target color
+            for (const auto& direction : directions) {
+                int nx = cx + direction[0];
+                int ny = cy + direction[1];
+                toVisit.push({nx, ny});
+            }
+        }
+    }
+	
+}
+
+void DrawableGameObject::CheckAndChange(int x, int y)
+{
+	if (x < 0 || x >= m_max || y < 0 || y >= m_max)
+		return;
+
+	// If the current color matches the target color, change it
+	if (m_colourMap[x][y].x == targetColour.x && m_colourMap[x][y].y == targetColour.y && m_colourMap[x][y].z == targetColour.z) {
+		m_colourMap[x][y] = newColour;  // Change the color
+		// Check the 4 surrounding cells
+		for (const auto& direction : directions) {
+			int nx = x + direction[0];
+			int ny = y + direction[1];
+			CheckAndChange(nx, ny);  // Recursive call for neighbors
+		}
+	}
+}
+
 DrawableGameObject::~DrawableGameObject()
 {
 	cleanup();

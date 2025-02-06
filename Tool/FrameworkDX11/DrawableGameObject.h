@@ -13,6 +13,7 @@
 #include <vector>
 #include "TerrainGenDS.h";
 #include "HydraulicErosion.h";
+#include <queue>;
 
 using namespace DirectX;
 
@@ -63,10 +64,16 @@ public:
 	void SetHeight(int x, int y, float z) { m_map[x][y] = z; }
 	XMFLOAT3 GetColour(int x, int y) { return m_colourMap[x][y]; }
 	void SetColour(int x, int y, XMFLOAT3 z) { m_colourMap[x][y] = z; }
+	XMFLOAT3 GetNormal(int x, int y) { return m_verticesArray[x * m_max + y].Normal; }
 	std::vector<std::vector<XMFLOAT3>>* GetColourMap() { return &m_colourMap; }
 	HydraulicErosion					hydraulicErosionClass;
+	void ColourFill(int x, int y, XMFLOAT3 Colour);
+	void CheckAndChange(int x, int y);
 private:
-	
+	int directions[4][2] = { {-1, 0}, {1, 0}, {0, -1}, {0, 1} };
+	XMFLOAT3 targetColour = XMFLOAT3(0, 0, 0);
+	XMFLOAT3 newColour = XMFLOAT3(0, 0, 0);
+
 	XMFLOAT4X4							m_World;
 
 	ID3D11Buffer*						m_pVertexBuffer;
