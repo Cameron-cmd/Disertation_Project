@@ -1865,7 +1865,7 @@ void LoadTerrain() {
 }
 
 void LoadPNG() {
-    std::wstring wSaveLocation = std::wstring(SaveLocation.begin(), SaveLocation.end());
+    std::wstring wSaveLocation = std::wstring(LoadObjLocation.begin(), LoadObjLocation.end());
     DirectX::ScratchImage image;
     HRESULT hr = DirectX::LoadFromWICFile(wSaveLocation.c_str(), DirectX::WIC_FLAGS_NONE, nullptr, image);
     if (FAILED(hr))
@@ -2392,7 +2392,7 @@ void Intro() {
     ImGui::SetNextWindowSizeConstraints(ImVec2(UIWidthL * 0.9 * ScaleX, 80 * ScaleY), ImVec2(UIWidthL * ScaleX, 1500 * ScaleY));
     ImGui::SetNextWindowPos(ImVec2(0,0));
     ImGui::Begin("Information and Controls", 0, ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::TextWrapped("This is a terrain generation tool. The two terrain generation modes Diamond Square and Noise can be accessed via the buttons along with the Colour.\n\nCTRL + Z to undo.\nCTRL+SHIFT+Z to redo.\n\nCamera movement:\nRight click will rotate the camera around the centre point\nControl + Left Click to move the centre point\nTo reset there is a button in view on the right hand side\nMiddle mouse button allows you to center on the location you clicked on\nScroll wheel to zoom in and out.\n\nTo directly edit slider values you can Control + Left Click on the sliders to access the value entry mode\n\n You can load in a heightmap(any) and glb model (only ones created from this tool for now) through the menu on the right along with exporting them. When loading into the tool you can adjust the model with the height slider but to start generating new models you will need to turn off the loaded model checkbox.\n\nYou can use the keys to access the brushes, \n1. Flatten Brush\n2. Raise Brush\n3. Lower Brush\n4. SmoothBrush\n5. Colour brush\nE. Erosion\nS. Model Wide Smooth\n\nClick the arrow at the top of this window to minimize this window.");
+    ImGui::TextWrapped("This is a terrain generation tool. The two terrain generation modes Diamond Square and Noise can be accessed via the buttons along with the Colour.\n\nCTRL + Z to undo.\nCTRL+SHIFT+Z to redo.\n\nCamera movement:\nRight click will rotate the camera around the centre point\nControl + Left Click to move the centre point\nTo reset there is a button in view on the right hand side\nMiddle mouse button allows you to center on the location you clicked on\nScroll wheel to zoom in and out.\n\nTo directly edit slider values you can Control + Left Click on the sliders to access the value entry mode\n\n You can load in a heightmap(any) and glb model (only ones created from this tool for now) through the menu on the right along with exporting them. When loading into the tool you can adjust the model with the height slider but to start generating new models you will need to turn off the loaded model checkbox.\n\nYou can use the keys to access the brushes, \n1. Flatten Brush\n2. Raise Brush\n3. Lower Brush\n4. SmoothBrush\n5. Colour brush\nE. Erosion\nS. Model Wide Smooth\nP. Picker\n\nClick the arrow at the top of this window to minimize this window.");
     if (ImGui::Button("Showcase terrain values")) {
         n_PerlinOctaves = 5;
         n_Exponent = 4.861f;
@@ -2502,7 +2502,7 @@ void Brush()
         ImGui::SliderFloat("Lower Rate", &b_LowerRate, 0.0f, 10.0f);
         HelpMarker("The rate of detracted height");
         ImGui::SetNextItemWidth(120 * ScaleX);
-        ImGui::SliderFloat("Lower Strength", &b_RaiseStrength, 0.01f, 1.0f);
+        ImGui::SliderFloat("Lower Strength", &b_LowerStrength, 0.01f, 1.0f);
         HelpMarker("How spread out the lower brush is, 0 lowers less further from the center, 1.0 lowers all points equally.");
     }
     ImGui::NextColumn();
